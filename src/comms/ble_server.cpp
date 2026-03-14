@@ -99,10 +99,10 @@ void ble_server_notify() {
     {
         const PpgData&  p = ppg_get();
         const TempData& t = temp_get();
-        int16_t skin100   = (int16_t)(t.skin_c * 100.0f);
+        int16_t skin100   = (int16_t)((t.valid ? t.skin_c : 0.0f) * 100.0f);
         uint8_t buf[4] = {
-            (uint8_t)(p.hr_valid   ? (uint8_t)p.hr   : 0),
-            (uint8_t)(p.spo2_valid ? (uint8_t)p.spo2 : 0),
+            (uint8_t)((p.finger_on && p.hr > 0) ? (uint8_t)p.hr : 0),
+            (uint8_t)((p.finger_on && p.spo2 > 0) ? (uint8_t)p.spo2 : 0),
             (uint8_t)(skin100 & 0xFF),
             (uint8_t)((skin100 >> 8) & 0xFF)
         };

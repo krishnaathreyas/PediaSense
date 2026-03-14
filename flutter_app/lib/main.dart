@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/caregiver_setup_screen.dart';
+import 'screens/device_connection_screen.dart';
 import 'screens/main_shell.dart';
 
 void main() {
@@ -22,6 +23,7 @@ class PediaSenseApp extends StatelessWidget {
       routes: {
         '/': (context) => const LoginScreen(),
         '/setup': (context) => const CaregiverSetupScreen(),
+        '/device': (context) => const DeviceConnectionScreen(),
         '/home': (context) => const MainShell(),
       },
     );

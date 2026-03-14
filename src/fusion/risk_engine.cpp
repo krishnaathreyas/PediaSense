@@ -99,8 +99,6 @@ void risk_engine_update() {
     if (tmp.valid) {
         float t_pen = range_penalty(tmp.skin_c, t_lo, t_hi, 2.0f);
         hydr += 0.50f * t_pen;
-    } else {
-        hydr += 10.0f;
     }
 
     // Heart rate (weight 30)

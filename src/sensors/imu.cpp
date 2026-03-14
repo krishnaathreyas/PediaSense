@@ -25,8 +25,10 @@ static int16_t read16(uint8_t reg) {
 
 bool imu_init() {
     Wire.beginTransmission(MPU_ADDR);
-    write_reg(PWR_MGMT_1, 0x00);   // wake from sleep
     if (Wire.endTransmission() != 0) return false;
+
+    write_reg(PWR_MGMT_1, 0x00);   // wake from sleep
+    delay(10);
     write_reg(ACCEL_CFG, 0x08);    // ±4g  → 8192 LSB/g
     write_reg(GYRO_CFG,  0x08);    // ±500°/s → 65.5 LSB/°/s
     ok = true;

@@ -40,6 +40,9 @@
 // ── Configuration ─────────────────────────────────────────────────────────────
 static const float BIRTH_WEIGHT_KG = 3.2f;   // <-- set per patient
 static const int   LOOP_PERIOD_MS  = 200;     // ~5 Hz main loop
+static const bool  ENABLE_TEMP_SENSOR = false;
+static const bool  ENABLE_MIC_SENSOR  = false;
+static const bool  ENABLE_ADVANCED_PROCESSING = false;
 
 // ── Serial debug helpers ──────────────────────────────────────────────────────
 static void print_status() {
@@ -54,8 +57,8 @@ static void print_status() {
 
     static const char* lvl_str[] = {"NORMAL", "AMBER", "RED"};
     Serial.printf("──────────────────────────────────────────────────\n");
-    Serial.printf("PPG  : HR=%d bpm  SpO2=%d%%  finger=%d\n",
-                  ppg.hr, ppg.spo2, ppg.finger_on);
+    Serial.printf("PPG  : IR=%ld  HR=%d bpm  SpO2=%d%%  finger=%d\n",
+                  ppg.ir_raw, ppg.hr, ppg.spo2, ppg.finger_on);
     Serial.printf("IMU  : mag=%.3f m/s²  delta=%.3f\n",
                   imu.accel_mag, imu.motion_delta);
     Serial.printf("Temp : skin=%.1f°C  amb=%.1f°C\n",
@@ -80,26 +83,52 @@ void setup() {
     Serial.println("\n[PediaSense] Starting up...");
 
     // I2C bus — max speed 400 kHz (individual drivers override if needed)
+    Serial.println("[BOOT] I2C begin");
     Wire.begin(21, 22);
     Wire.setClock(400000);
+    Serial.println("[BOOT] I2C ready");
 
     // Sensors
+    Serial.println("[BOOT] PPG init...");
     if (!ppg_init())  Serial.println("[WARN] PPG init failed");
+    Serial.println("[BOOT] PPG done");
+
+    Serial.println("[BOOT] IMU init...");
     if (!imu_init())  Serial.println("[WARN] IMU init failed");
-    if (!temp_init()) Serial.println("[WARN] TEMP init failed");
-    mic_init();
+    Serial.println("[BOOT] IMU done");
+
+    if (ENABLE_TEMP_SENSOR) {
+        Serial.println("[BOOT] TEMP init...");
+        if (!temp_init()) Serial.println("[WARN] TEMP init failed");
+        Serial.println("[BOOT] TEMP done");
+    }
+    if (ENABLE_MIC_SENSOR) {
+        Serial.println("[BOOT] MIC init...");
+        mic_init();
+        Serial.println("[BOOT] MIC done");
+    }
 
     // Processing
+    Serial.println("[BOOT] Processing init...");
     breathing_init();
-    apnea_init();
-    cry_init();
+    if (ENABLE_ADVANCED_PROCESSING) {
+        apnea_init();
+        cry_init();
+    }
+    Serial.println("[BOOT] Processing ready");
 
     // Fusion
-    risk_engine_init(BIRTH_WEIGHT_KG);
-    classifier_init();
+    if (ENABLE_ADVANCED_PROCESSING) {
+        Serial.println("[BOOT] Fusion init...");
+        risk_engine_init(BIRTH_WEIGHT_KG);
+        classifier_init();
+        Serial.println("[BOOT] Fusion ready");
+    }
 
     // Comms
+    Serial.println("[BOOT] BLE init...");
     ble_server_init("PediaSense");
+    Serial.println("[BOOT] BLE ready");
 
     Serial.println("[PediaSense] Ready.");
 }
@@ -114,17 +143,21 @@ void loop() {
     // 1 — Read sensors
     ppg_update();
     imu_update();
-    temp_update();
-    mic_update();
+    if (ENABLE_TEMP_SENSOR) temp_update();
+    if (ENABLE_MIC_SENSOR)  mic_update();
 
     // 2 — Process signals
     breathing_update();
-    apnea_update();
-    cry_update();
+    if (ENABLE_ADVANCED_PROCESSING) {
+        apnea_update();
+        cry_update();
+    }
 
     // 3 — Fuse & classify
-    risk_engine_update();
-    classifier_update();
+    if (ENABLE_ADVANCED_PROCESSING) {
+        risk_engine_update();
+        classifier_update();
+    }
 
     // 4 — Transmit over BLE
     ble_server_notify();

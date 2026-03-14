@@ -210,7 +210,7 @@ void setup() {
         .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
         .sample_rate = 16000,
         .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
         .dma_buf_count = 4,
@@ -323,16 +323,23 @@ void loop() {
     int32_t mic_buf[512];
     size_t bytesRead = 0;
     i2s_read(I2S_NUM_0, mic_buf, sizeof(mic_buf), &bytesRead, 100 / portTICK_PERIOD_MS);
-    int samples = bytesRead / 4;
+    int samples = bytesRead / 4; // interleaved L,R
     float mic_rms = 0;
     int32_t mic_peak = 0;
-    for (int i = 0; i < samples; i++) {
-        int32_t v = mic_buf[i] >> 8; // 24-bit
+    int monoSamples = 0;
+    for (int i = 0; i + 1 < samples; i += 2) {
+        int32_t left  = mic_buf[i] >> 8;
+        int32_t right = mic_buf[i + 1] >> 8;
+        int32_t aL    = left < 0 ? -left : left;
+        int32_t aR    = right < 0 ? -right : right;
+        int32_t v     = (aL >= aR) ? left : right;
         float fv = (float)v;
         mic_rms += fv * fv;
-        if (abs(v) > mic_peak) mic_peak = abs(v);
+        int32_t a = v < 0 ? -v : v;
+        if (a > mic_peak) mic_peak = a;
+        monoSamples++;
     }
-    mic_rms = (samples > 0) ? sqrtf(mic_rms / samples) : 0;
+    mic_rms = (monoSamples > 0) ? sqrtf(mic_rms / monoSamples) : 0;
 
     // ── PRINT ──────────────────────────────────────────────────
     Serial.println("──────────────────────────────────────────────");
@@ -351,7 +358,7 @@ void loop() {
     Serial.printf("TEMP │ skin=%.1f°C  ambient=%.1f°C  %s\n",
                   skin, amb, (skin > -200) ? "OK" : "FAIL");
     Serial.printf("MIC  │ RMS=%.0f  peak=%ld  samples=%d  %s\n",
-                  mic_rms, (long)mic_peak, samples,
+                  mic_rms, (long)mic_peak, monoSamples,
                   (mic_peak > 0) ? "OK" : "NO DATA");
     Serial.println();
     // 100 samples at 100Hz ≈ 1 sec, no extra delay needed

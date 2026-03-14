@@ -35,10 +35,11 @@ static bool sp_ready = false;
 
 bool ppg_init() {
     if (!sensor.begin(Wire, I2C_SPEED_FAST)) return false;
-    // ledBrightness=60, sampleAvg=4, ledMode=2(Red+IR), rate=100, pw=411, adc=4096
-    sensor.setup(60, 4, 2, 100, 411, 4096);
-    sensor.setPulseAmplitudeRed(0x0A);
-    sensor.setPulseAmplitudeIR(0x1F);
+    // Demo-tuned: higher LED drive and lower averaging for faster beat detection lock
+    // ledBrightness=80, sampleAvg=1, ledMode=2(Red+IR), rate=100, pw=411, adc=4096
+    sensor.setup(80, 1, 2, 100, 411, 4096);
+    sensor.setPulseAmplitudeRed(0x3F);
+    sensor.setPulseAmplitudeIR(0x3F);
     sensor.setPulseAmplitudeGreen(0);
     ok = true;
     return true;
@@ -47,44 +48,77 @@ bool ppg_init() {
 void ppg_update() {
     if (!ok) return;
 
-    long ir = sensor.getIR();
-    long red = sensor.getRed();
+    // Pull fresh samples from sensor FIFO into SparkFun internal buffer
+    sensor.check();
 
-    data.ir_raw   = ir;
-    data.finger_on = (ir > 50000);
+    bool hadSample = false;
+    while (sensor.available()) {
+        hadSample = true;
+        long ir = sensor.getIR();
+        long red = sensor.getRed();
+        sensor.nextSample();
 
-    // Store in IR ring-buffer for breathing module
-    ppg_ir_buf[ppg_ir_head] = (uint32_t)ir;
-    ppg_ir_head = (ppg_ir_head + 1) % PPG_IR_BUF_SIZE;
+        data.ir_raw = ir;
+        data.finger_on = (ir > 12000);
 
-    // ── HR via PBA algorithm ─────────────────────────────────
-    if (checkForBeat(ir)) {
-        long delta = millis() - lastBeat;
-        lastBeat = millis();
-        float bpm = 60.0f / (delta / 1000.0f);
-        if (bpm > 20 && bpm < 255) {
-            rates[rateSpot++] = (byte)bpm;
-            rateSpot %= RATE_SIZE;
-            int sum = 0;
-            for (byte i = 0; i < RATE_SIZE; i++) sum += rates[i];
-            data.hr       = sum / RATE_SIZE;
-            data.hr_valid = (data.finger_on && data.hr >= 60 && data.hr <= 200);
+        // Store in IR ring-buffer for breathing module
+        ppg_ir_buf[ppg_ir_head] = (uint32_t)ir;
+        ppg_ir_head = (ppg_ir_head + 1) % PPG_IR_BUF_SIZE;
+
+        // ── HR via PBA algorithm ─────────────────────────────
+        if (checkForBeat(ir)) {
+            long delta = millis() - lastBeat;
+            lastBeat = millis();
+            float bpm = 60.0f / (delta / 1000.0f);
+            if (bpm > 20 && bpm < 255) {
+                rates[rateSpot++] = (byte)bpm;
+                rateSpot %= RATE_SIZE;
+                int sum = 0;
+                int n = 0;
+                for (byte i = 0; i < RATE_SIZE; i++) {
+                    if (rates[i] > 0) {
+                        sum += rates[i];
+                        n++;
+                    }
+                }
+                if (n > 0) {
+                    data.hr = sum / n;
+                    data.hr_valid = (data.finger_on && data.hr >= 60 && data.hr <= 200);
+                }
+            }
+        }
+
+        // ── SpO2 via Maxim algorithm ─────────────────────────
+        irBuf[sp_idx]  = (uint32_t)ir;
+        redBuf[sp_idx] = (uint32_t)red;
+        sp_idx++;
+        if (sp_idx >= SP_BUF) {
+            sp_idx = 0;
+            sp_ready = true;
         }
     }
 
-    // ── SpO2 via Maxim algorithm ─────────────────────────────
-    irBuf[sp_idx]  = (uint32_t)ir;
-    redBuf[sp_idx] = (uint32_t)red;
-    sp_idx++;
-    if (sp_idx >= SP_BUF) {
-        sp_idx = 0;
-        sp_ready = true;
+    if (!hadSample) return;
+
+    if (!data.finger_on) {
+        data.hr = 0;
+        data.spo2 = 0;
+        data.hr_valid = false;
+        data.spo2_valid = false;
+        return;
     }
+
     if (sp_ready) {
         maxim_heart_rate_and_oxygen_saturation(
             irBuf, SP_BUF, redBuf,
             &spo2_raw, &spo2_valid_flag,
             &hr_sp, &hr_sp_valid);
+
+        if (hr_sp_valid == 1 && hr_sp > 30 && hr_sp < 240) {
+            data.hr = (uint8_t)hr_sp;
+            data.hr_valid = true;
+        }
+
         data.spo2       = (uint8_t)(spo2_raw > 0 ? spo2_raw : 0);
         data.spo2_valid = (spo2_valid_flag == 1 && data.spo2 >= 80 && data.spo2 <= 100);
     }

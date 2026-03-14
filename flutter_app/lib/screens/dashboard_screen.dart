@@ -94,10 +94,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Header
-          Text(
-            'Welcome back,',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
+          Text('Welcome back,', style: Theme.of(context).textTheme.bodyMedium),
           Text(
             "${_profile.babyName}'s Health",
             style: Theme.of(context).textTheme.headlineLarge,
@@ -146,10 +143,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              _riskColor,
-              _riskColor.withValues(alpha: 0.75),
-            ],
+            colors: [_riskColor, _riskColor.withValues(alpha: 0.75)],
           ),
           boxShadow: [
             BoxShadow(
@@ -256,8 +250,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           iconColor: AppTheme.warningMain,
           label: 'Skin Temp',
           value: '${_vitals.skinTemp.toStringAsFixed(1)}°C',
-          subtitle:
-              '${(_vitals.skinTemp * 9 / 5 + 32).toStringAsFixed(1)}°F',
+          subtitle: '${(_vitals.skinTemp * 9 / 5 + 32).toStringAsFixed(1)}°F',
         ),
       ],
     );
@@ -294,18 +287,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 8),
             Text(
               value,
-              style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                    fontSize: 22,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineLarge?.copyWith(fontSize: 22),
             ),
             if (badge != null) ...[
               const SizedBox(height: 4),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: (badgeColor ?? AppTheme.successMain)
-                      .withValues(alpha: 0.1),
+                  color: (badgeColor ?? AppTheme.successMain).withValues(
+                    alpha: 0.1,
+                  ),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -318,10 +311,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
             ] else if (subtitle != null)
-              Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
       ),
@@ -344,8 +334,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.water_drop,
-                              size: 20, color: AppTheme.infoMain),
+                          const Icon(
+                            Icons.water_drop,
+                            size: 20,
+                            color: AppTheme.infoMain,
+                          ),
                           const SizedBox(width: 8),
                           Text(
                             'Urine Gap',

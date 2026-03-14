@@ -14,9 +14,12 @@ class EspBleService {
 
   final _vitalsController = StreamController<VitalsData>.broadcast();
   final _connectedController = StreamController<bool>.broadcast();
+  final _scanResultsController = StreamController<List<ScanResult>>.broadcast();
 
   Stream<VitalsData> get vitalsStream => _vitalsController.stream;
   Stream<bool> get connectedStream => _connectedController.stream;
+  Stream<List<ScanResult>> get scanResultsStream =>
+      _scanResultsController.stream;
 
   VitalsData _latest = VitalsData(
     spo2: 0,
@@ -32,14 +35,22 @@ class EspBleService {
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connectionSub;
   final List<StreamSubscription<List<int>>> _notifySubs = [];
+  Timer? _publishTimer;
 
   Future<void> start() async {
     await FlutterBluePlus.stopScan();
 
+    _publishTimer?.cancel();
+    _publishTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _vitalsController.add(_latest);
+    });
+
     _scanSub = FlutterBluePlus.scanResults.listen((results) async {
+      _scanResultsController.add(results);
       for (final result in results) {
-        final hasService =
-          result.advertisementData.serviceUuids.contains(serviceUuid);
+        final hasService = result.advertisementData.serviceUuids.contains(
+          serviceUuid,
+        );
         final looksLikePediaSense = result.device.platformName
             .toLowerCase()
             .contains('pediasense');
@@ -57,6 +68,27 @@ class EspBleService {
       timeout: const Duration(seconds: 12),
       androidUsesFineLocation: true,
     );
+  }
+
+  Future<void> scanNearby({
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    await FlutterBluePlus.stopScan();
+    await _scanSub?.cancel();
+
+    _scanSub = FlutterBluePlus.scanResults.listen((results) {
+      _scanResultsController.add(results);
+    });
+
+    await FlutterBluePlus.startScan(
+      timeout: timeout,
+      androidUsesFineLocation: true,
+    );
+  }
+
+  Future<void> connectToScanResult(ScanResult result) async {
+    await FlutterBluePlus.stopScan();
+    await _connect(result.device);
   }
 
   Future<void> _connect(BluetoothDevice device) async {
@@ -123,11 +155,13 @@ class EspBleService {
       _latest = _latest.copyWith(riskLevel: risk);
     }
 
-    _vitalsController.add(_latest);
+    // UI stream is published every 5 seconds by _publishTimer.
   }
 
   Future<void> stop() async {
     await FlutterBluePlus.stopScan();
+    _publishTimer?.cancel();
+    _publishTimer = null;
     await _scanSub?.cancel();
     await _connectionSub?.cancel();
     _cancelNotifySubs();
@@ -145,6 +179,7 @@ class EspBleService {
 
   Future<void> dispose() async {
     await stop();
+    await _scanResultsController.close();
     await _vitalsController.close();
     await _connectedController.close();
   }

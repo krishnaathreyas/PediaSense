@@ -45,7 +45,7 @@ class _CaregiverSetupScreenState extends State<CaregiverSetupScreen> {
       );
       await BabyProfile.save(profile);
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
+        Navigator.pushReplacementNamed(context, '/device');
       }
     } else {
       setState(() {
@@ -112,8 +112,11 @@ class _CaregiverSetupScreenState extends State<CaregiverSetupScreen> {
                                     ),
                                     child: Center(
                                       child: index < _activeStep
-                                          ? const Icon(Icons.check,
-                                              size: 16, color: Colors.white)
+                                          ? const Icon(
+                                              Icons.check,
+                                              size: 16,
+                                              color: Colors.white,
+                                            )
                                           : Text(
                                               '${index + 1}',
                                               style: TextStyle(
@@ -161,8 +164,7 @@ class _CaregiverSetupScreenState extends State<CaregiverSetupScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             OutlinedButton(
-                              onPressed:
-                                  _activeStep > 0 ? _handleBack : null,
+                              onPressed: _activeStep > 0 ? _handleBack : null,
                               child: const Text('Back'),
                             ),
                             ElevatedButton(
@@ -226,9 +228,7 @@ class _CaregiverSetupScreenState extends State<CaregiverSetupScreen> {
         TextFormField(
           controller: _weightController,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Weight (kg)',
-          ),
+          decoration: const InputDecoration(labelText: 'Weight (kg)'),
           onChanged: (_) => setState(() {}),
         ),
       ],

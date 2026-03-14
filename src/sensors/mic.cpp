@@ -22,7 +22,7 @@ bool mic_init() {
         .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
         .sample_rate          = SAMPLE_RATE,
         .bits_per_sample      = I2S_BITS_PER_SAMPLE_32BIT,
-        .channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
         .dma_buf_count        = 8,
@@ -47,23 +47,31 @@ bool mic_init() {
 void mic_update() {
     if (!ok) return;
     size_t bytesRead = 0;
-    // Non-blocking: 0 ms timeout — take whatever is in the DMA buffer right now
-    i2s_read(I2S_PORT, raw32, sizeof(raw32), &bytesRead, 0);
+    // Small blocking timeout to ensure a fresh buffer each cycle
+    i2s_read(I2S_PORT, raw32, sizeof(raw32), &bytesRead, 20 / portTICK_PERIOD_MS);
 
-    int count = bytesRead / sizeof(int32_t);
-    if (count == 0) return;
+    int count = bytesRead / sizeof(int32_t);  // interleaved L,R samples
+    if (count < 2) return;
 
     int64_t sum  = 0;
     int32_t peak = 0;
-    for (int i = 0; i < count; i++) {
-        int32_t s = raw32[i] >> 8;   // 24-bit left-justified → signed 24-bit
-        mic_buf[i] = s;
+    int outCount = 0;
+    for (int i = 0; i + 1 < count && outCount < MIC_BUF_SIZE; i += 2) {
+        int32_t left  = raw32[i] >> 8;      // 24-bit left-justified
+        int32_t right = raw32[i + 1] >> 8;  // 24-bit left-justified
+        int32_t aL    = left < 0 ? -left : left;
+        int32_t aR    = right < 0 ? -right : right;
+        int32_t s     = (aL >= aR) ? left : right;  // auto-pick active channel
+
+        mic_buf[outCount++] = s;
         int32_t a  = s < 0 ? -s : s;
         if (a > peak) peak = a;
         sum += (int64_t)s * s;
     }
-    mic_buf_count  = count;
-    data.rms       = sqrtf((float)(sum / count));
+
+    if (outCount == 0) return;
+    mic_buf_count  = outCount;
+    data.rms       = sqrtf((float)(sum / outCount));
     data.peak      = peak;
     data.active    = (data.rms > MIC_ACTIVE_THRESHOLD);
 }
