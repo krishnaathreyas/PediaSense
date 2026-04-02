@@ -211,6 +211,20 @@ class _DeviceConnectionScreenState extends State<DeviceConnectionScreen> {
                       : null,
                   child: const Text('Proceed to Dashboard'),
                 ),
+                const SizedBox(height: 8),
+                // Skip option for when BLE hardware is not available
+                if (!_isConnected)
+                  TextButton(
+                    onPressed: () =>
+                        Navigator.pushReplacementNamed(context, '/home'),
+                    child: Text(
+                      'Skip for now — use without sensor',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

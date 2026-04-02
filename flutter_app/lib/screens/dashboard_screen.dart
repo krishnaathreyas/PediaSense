@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../theme/app_theme.dart';
 import '../models/vitals_data.dart';
 import '../models/baby_profile.dart';
 import '../services/esp_ble_service.dart';
+import '../services/simulated_ble_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -24,52 +26,112 @@ class _DashboardScreenState extends State<DashboardScreen> {
   );
 
   BabyProfile _profile = BabyProfile.defaultProfile();
-  final EspBleService _bleService = EspBleService();
+
+  // Services — one of these will be active
+  EspBleService? _bleService;
+  SimulatedBleService? _simService;
+
   StreamSubscription<VitalsData>? _vitalsSub;
   StreamSubscription<bool>? _connectedSub;
   bool _bleConnected = false;
+  bool _isSimulated = false;
+  Timer? _fallbackTimer;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
-    _connectedSub = _bleService.connectedStream.listen((connected) {
+    _initVitalsSource();
+  }
+
+  Future<void> _initVitalsSource() async {
+    // Try real BLE first; fall back to simulator if no connection within 15s
+    try {
+      final supported = await FlutterBluePlus.isSupported;
+      if (!supported) throw Exception('BLE not supported');
+
+      final ble = EspBleService();
+      _bleService = ble;
+
+      _connectedSub = ble.connectedStream.listen((connected) {
+        if (!mounted) return;
+        setState(() => _bleConnected = connected);
+        if (connected) {
+          _fallbackTimer?.cancel(); // BLE connected — cancel fallback
+        }
+      });
+
+      _vitalsSub = ble.vitalsStream.listen((vitals) {
+        if (!mounted) return;
+        setState(() {
+          _vitals = _vitals.copyWith(
+            spo2: vitals.spo2,
+            heartRate: vitals.heartRate,
+            breathingRate: vitals.breathingRate,
+            skinTemp: vitals.skinTemp,
+            riskLevel: vitals.riskLevel,
+          );
+        });
+      });
+
+      await ble.start();
+
+      // If no BLE connection within 15s, switch to simulator
+      _fallbackTimer = Timer(const Duration(seconds: 15), () {
+        if (!_bleConnected && mounted) {
+          _tearDownBle();
+          _startSimulator();
+        }
+      });
+    } catch (_) {
+      // BLE unavailable — use simulator immediately
+      _startSimulator();
+    }
+  }
+
+  void _tearDownBle() {
+    _vitalsSub?.cancel();
+    _connectedSub?.cancel();
+    _bleService?.dispose();
+    _bleService = null;
+    _vitalsSub = null;
+    _connectedSub = null;
+  }
+
+  void _startSimulator() {
+    final sim = SimulatedBleService();
+    _simService = sim;
+
+    _connectedSub = sim.connectedStream.listen((connected) {
       if (!mounted) return;
       setState(() {
         _bleConnected = connected;
+        _isSimulated = true;
       });
     });
 
-    _vitalsSub = _bleService.vitalsStream.listen((vitals) {
+    _vitalsSub = sim.vitalsStream.listen((vitals) {
       if (!mounted) return;
-      setState(() {
-        _vitals = _vitals.copyWith(
-          spo2: vitals.spo2,
-          heartRate: vitals.heartRate,
-          breathingRate: vitals.breathingRate,
-          skinTemp: vitals.skinTemp,
-          riskLevel: vitals.riskLevel,
-        );
-      });
+      setState(() => _vitals = vitals);
     });
 
-    _bleService.start();
+    sim.start();
   }
 
   Future<void> _loadProfile() async {
     final profile = await BabyProfile.load();
     if (mounted) {
-      setState(() {
-        _profile = profile;
-      });
+      setState(() => _profile = profile);
     }
   }
 
   @override
   void dispose() {
+    _fallbackTimer?.cancel();
     _vitalsSub?.cancel();
     _connectedSub?.cancel();
-    _bleService.dispose();
+    _bleService?.dispose();
+    _simService?.dispose();
     super.dispose();
   }
 
@@ -101,9 +163,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            _bleConnected
-                ? 'BLE: Connected to ESP32'
-                : 'BLE: Scanning for PediaSense...',
+            _isSimulated
+                ? '⚡ Simulated Mode — vitals are generated'
+                : (_bleConnected
+                    ? 'BLE: Connected to ESP32'
+                    : 'BLE: Scanning for PediaSense...'),
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 20),

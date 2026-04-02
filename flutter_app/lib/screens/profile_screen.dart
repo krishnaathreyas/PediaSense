@@ -32,7 +32,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _handleLogout() async {
     await BabyProfile.clear();
     if (mounted) {
-      Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
     }
   }
 
