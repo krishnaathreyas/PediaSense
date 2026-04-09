@@ -2,10 +2,10 @@
 #include <driver/i2s.h>
 
 // Mic-only wiring (current test):
-// VDD -> 3V3, GND -> GND, SD -> GPIO21, SCK -> GPIO18, WS -> GPIO19, L/R -> GND
-static constexpr int I2S_SCK_PIN = 18;
-static constexpr int I2S_WS_PIN  = 19;
-static constexpr int I2S_SD_PIN  = 21;
+// VDD -> 3V3, GND -> GND, SD -> GPIO32, SCK -> GPIO14, WS -> GPIO15, L/R -> GND
+static constexpr int I2S_SCK_PIN = 14;
+static constexpr int I2S_WS_PIN  = 15;
+static constexpr int I2S_SD_PIN  = 32;
 
 static constexpr i2s_port_t I2S_PORT = I2S_NUM_0;
 static constexpr int SAMPLE_RATE = 16000;

@@ -18,12 +18,32 @@ EMBEDDING_DIM = 768        # reduced from 3072 to fit pgvector index limit
 BATCH_SIZE = 5
 RATE_DELAY = 4.0
 
-SOURCE_DOCS = [
-    {"filename": "WHO_IMCI_Chart_Booklet.pdf", "source": "WHO_IMCI",
-     "source_url": "https://iris.who.int/handle/10665/104772"},
-    {"filename": "IAP_Neonatal_Guidelines.pdf", "source": "IAP",
-     "source_url": "https://www.iapneochap.org"},
-]
+# Known PDFs with curated source URLs. Any OTHER .pdf in source_docs/
+# is auto-discovered and assigned a source name from the filename.
+KNOWN_SOURCES = {
+    "WHO_IMCI_Chart_Booklet.pdf": {
+        "source": "WHO_IMCI",
+        "source_url": "https://iris.who.int/handle/10665/104772",
+    },
+    "IAP_Neonatal_Guidelines.pdf": {
+        "source": "IAP",
+        "source_url": "https://www.iapneochap.org",
+    },
+}
+
+def discover_pdfs(src_dir: Path):
+    """Auto-discover all PDFs in source_docs/. Known files get curated
+    metadata; unknown files get a source name derived from the filename."""
+    configs = []
+    for pdf in sorted(src_dir.glob("*.pdf")):
+        if pdf.name in KNOWN_SOURCES:
+            cfg = {"filename": pdf.name, **KNOWN_SOURCES[pdf.name]}
+        else:
+            # Derive source name: "neonatal_care_guide.pdf" → "NEONATAL_CARE_GUIDE"
+            stem = pdf.stem.replace(" ", "_").replace("-", "_").upper()
+            cfg = {"filename": pdf.name, "source": stem, "source_url": ""}
+        configs.append(cfg)
+    return configs
 
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -117,13 +137,14 @@ def main():
     print("PediaSense RAG — Chunk & Embed")
     print("=" * 50)
     src = Path(__file__).parent / "source_docs"
+    pdf_configs = discover_pdfs(src)
+    if not pdf_configs:
+        print("❌ No PDFs found. Place PDFs in scripts/source_docs/"); sys.exit(1)
+    print(f"📚 Found {len(pdf_configs)} PDF(s)")
     all_chunks = []
-    for cfg in SOURCE_DOCS:
+    for cfg in pdf_configs:
         p = src / cfg["filename"]
-        if p.exists():
-            all_chunks.extend(chunk_doc(p, cfg))
-        else:
-            print(f"⚠️  Not found: {p}")
+        all_chunks.extend(chunk_doc(p, cfg))
     if not all_chunks:
         print("❌ No chunks. Place PDFs in scripts/source_docs/"); sys.exit(1)
     embedded = embed_chunks(all_chunks)

@@ -9,11 +9,11 @@
  *    MAX30102  — PPG (HR / SpO2 / IR)     I2C  0x57
  *    MPU6050   — IMU (accel + gyro)        I2C  0x68
  *    MLX90614  — Skin + ambient temp       I2C  0x5A
- *    INMP441   — MEMS microphone           I2S  GPIO26/25/34
+ *    INMP441   — MEMS microphone           I2S  GPIO14/15/32
  *
  *  Pins:
  *    I2C  SDA=21  SCL=22
- *    I2S  SCK=26  WS=25  SD=34
+ *    I2S  SCK=14  WS=15  SD=32
  * ═══════════════════════════════════════════════════════════════════
  */
 
@@ -45,9 +45,9 @@ static bool mlxFound = false;  // skip MLX reads if not on bus
 #define MLX_TAMB   0x06
 
 // ── I2S pins ───────────────────────────────────────────────────
-#define I2S_SCK  26
-#define I2S_WS   25
-#define I2S_SD   34
+#define I2S_SCK  14
+#define I2S_WS   15
+#define I2S_SD   32
 
 // ── HR / SpO2 state ────────────────────────────────────────────
 static float avgHR     = 0;

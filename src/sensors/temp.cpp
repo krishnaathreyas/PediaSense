@@ -1,7 +1,7 @@
 #include "temp.h"
 #include <Wire.h>
 
-#define MLX_ADDR 0x48
+#define MLX_ADDR 0x5A
 #define MLX_OBJ_TEMP 0x07
 #define MLX_AMB_TEMP 0x06
 
