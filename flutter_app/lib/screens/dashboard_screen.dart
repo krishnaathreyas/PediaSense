@@ -6,6 +6,7 @@ import '../models/vitals_data.dart';
 import '../models/baby_profile.dart';
 import '../services/esp_ble_service.dart';
 import '../services/simulated_ble_service.dart';
+import '../services/rag_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -72,6 +73,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             riskLevel: vitals.riskLevel,
           );
         });
+        // Forward vitals to RAG service for AMBER/RED suggestions
+        RagService.instance.onVitalsUpdate(
+          _vitals,
+          babyAgeMonths: _profile.ageMonths,
+          isLBW: _profile.isLowBirthWeight,
+        );
       });
 
       await ble.start();
@@ -113,6 +120,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _vitalsSub = sim.vitalsStream.listen((vitals) {
       if (!mounted) return;
       setState(() => _vitals = vitals);
+      // Forward vitals to RAG service for AMBER/RED suggestions
+      RagService.instance.onVitalsUpdate(
+        vitals,
+        babyAgeMonths: _profile.ageMonths,
+        isLBW: _profile.isLowBirthWeight,
+      );
     });
 
     sim.start();

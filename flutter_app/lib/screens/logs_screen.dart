@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+
 import '../theme/app_theme.dart';
 import '../models/log_entry.dart';
+import '../services/care_log_service.dart';
 
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key});
@@ -12,21 +14,11 @@ class LogsScreen extends StatefulWidget {
 class _LogsScreenState extends State<LogsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final _service = CareLogService.instance;
 
-  final List<LogEntry> _logs = [
-    LogEntry(
-      id: '1',
-      timestamp: DateTime.now().subtract(const Duration(hours: 2)),
-      type: LogType.diaper,
-      data: {'wetness': 'wet', 'stool': 'normal'},
-    ),
-    LogEntry(
-      id: '2',
-      timestamp: DateTime.now().subtract(const Duration(hours: 4)),
-      type: LogType.feeding,
-      data: {'type': 'breast', 'duration': 25},
-    ),
-  ];
+  List<LogEntry> _logs = [];
+  bool _isLoading = true;
+  String? _error;
 
   // Form state
   String _diaperWetness = 'wet';
@@ -41,6 +33,7 @@ class _LogsScreenState extends State<LogsScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _fetchLogs();
   }
 
   @override
@@ -51,61 +44,114 @@ class _LogsScreenState extends State<LogsScreen>
     super.dispose();
   }
 
+  // ── Fetch today's logs from Supabase ────────────────────────────────────
+
+  Future<void> _fetchLogs() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final logs = await _service.fetchTodayLogs();
+      if (!mounted) return;
+      setState(() {
+        _logs = logs;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = 'Failed to load logs. Pull to retry.';
+      });
+    }
+  }
+
+  // ── Filtered by current tab ─────────────────────────────────────────────
+
   List<LogEntry> get _filteredLogs {
     final types = [LogType.diaper, LogType.feeding, LogType.symptom];
     return _logs.where((log) => log.type == types[_tabController.index]).toList();
   }
 
-  void _addLog() {
-    LogEntry? newLog;
+  // ── Add log to Supabase ─────────────────────────────────────────────────
+
+  Future<void> _addLog() async {
     final currentTab = _tabController.index;
+    LogType type;
+    Map<String, dynamic> value;
 
     if (currentTab == 0) {
-      newLog = LogEntry(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        timestamp: DateTime.now(),
-        type: LogType.diaper,
-        data: {'wetness': _diaperWetness, 'stool': _diaperStool},
-      );
+      type = LogType.diaper;
+      value = {'wetness': _diaperWetness, 'stool': _diaperStool};
       _diaperWetness = 'wet';
       _diaperStool = 'none';
     } else if (currentTab == 1) {
-      newLog = LogEntry(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        timestamp: DateTime.now(),
-        type: LogType.feeding,
-        data: {
-          'type': _feedingType,
-          'duration': int.tryParse(_feedingDurationController.text) ?? 0,
-        },
-      );
+      type = LogType.feeding;
+      value = {
+        'type': _feedingType,
+        'duration': int.tryParse(_feedingDurationController.text) ?? 0,
+      };
       _feedingDurationController.clear();
     } else {
-      newLog = LogEntry(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        timestamp: DateTime.now(),
-        type: LogType.symptom,
-        data: {
-          'type': _symptomType,
-          'severity': _symptomSeverity,
-          'notes': _symptomNotesController.text,
-        },
-      );
+      type = LogType.symptom;
+      value = {
+        'type': _symptomType,
+        'severity': _symptomSeverity,
+        'notes': _symptomNotesController.text,
+      };
       _symptomType = 'diarrhea';
       _symptomSeverity = 'mild';
       _symptomNotesController.clear();
     }
 
-    setState(() {
-      _logs.insert(0, newLog!);
-    });
+    try {
+      final newLog = await _service.addLog(type: type, value: value);
+      if (!mounted) return;
+      setState(() {
+        _logs.insert(0, newLog); // Optimistic — add to top immediately
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to save log. Please try again.'),
+          backgroundColor: AppTheme.errorMain,
+        ),
+      );
+    }
   }
 
-  void _deleteLog(String id) {
+  // ── Delete log from Supabase ────────────────────────────────────────────
+
+  Future<void> _deleteLog(String id) async {
+    // Optimistic removal
+    final removed = _logs.firstWhere((l) => l.id == id);
+    final index = _logs.indexOf(removed);
+
     setState(() {
       _logs.removeWhere((log) => log.id == id);
     });
+
+    try {
+      await _service.deleteLog(id);
+    } catch (_) {
+      // Revert on failure
+      if (!mounted) return;
+      setState(() {
+        _logs.insert(index, removed);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to delete log.'),
+          backgroundColor: AppTheme.errorMain,
+        ),
+      );
+    }
   }
+
+  // ── Icon helper ─────────────────────────────────────────────────────────
 
   IconData _getLogIcon(LogType type) {
     switch (type) {
@@ -117,6 +163,19 @@ class _LogsScreenState extends State<LogsScreen>
         return Icons.medication;
     }
   }
+
+  Color _getLogColor(LogType type) {
+    switch (type) {
+      case LogType.diaper:
+        return AppTheme.infoMain;
+      case LogType.feeding:
+        return AppTheme.successMain;
+      case LogType.symptom:
+        return AppTheme.warningMain;
+    }
+  }
+
+  // ── Add dialog ──────────────────────────────────────────────────────────
 
   void _showAddDialog() {
     showDialog(
@@ -260,6 +319,10 @@ class _LogsScreenState extends State<LogsScreen>
     );
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  //  BUILD
+  // ═════════════════════════════════════════════════════════════════════════
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -315,69 +378,139 @@ class _LogsScreenState extends State<LogsScreen>
 
         // Log entries
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Recent Entries',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: _filteredLogs.isEmpty
-                          ? Center(
-                              child: Text(
-                                'No entries yet. Add your first entry above.',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                            )
-                          : ListView.builder(
-                              itemCount: _filteredLogs.length,
-                              itemBuilder: (context, index) {
-                                final log = _filteredLogs[index];
-                                return Container(
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.backgroundDefault,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: ListTile(
-                                    leading: Icon(
-                                      _getLogIcon(log.type),
-                                      color: AppTheme.primaryMain,
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+                  ? _buildErrorState()
+                  : RefreshIndicator(
+                      onRefresh: _fetchLogs,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        "Today's Entries",
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .headlineSmall,
+                                      ),
                                     ),
-                                    title: Text(
-                                      log.formattedData,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w500),
+                                    Text(
+                                      '${_filteredLogs.length}',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppTheme.primaryMain,
+                                      ),
                                     ),
-                                    subtitle: Text(
-                                      '${log.timestamp.day}/${log.timestamp.month}/${log.timestamp.year} ${log.timestamp.hour}:${log.timestamp.minute.toString().padLeft(2, '0')}',
-                                    ),
-                                    trailing: IconButton(
-                                      icon: const Icon(Icons.delete,
-                                          color: Colors.grey),
-                                      onPressed: () =>
-                                          _deleteLog(log.id),
-                                    ),
-                                  ),
-                                );
-                              },
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Expanded(
+                                  child: _filteredLogs.isEmpty
+                                      ? _buildEmptyState()
+                                      : ListView.builder(
+                                          itemCount: _filteredLogs.length,
+                                          itemBuilder: (context, index) {
+                                            final log = _filteredLogs[index];
+                                            return _buildLogTile(log);
+                                          },
+                                        ),
+                                ),
+                              ],
                             ),
+                          ),
+                        ),
+                      ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-          ),
         ),
         const SizedBox(height: 80),
       ],
+    );
+  }
+
+  Widget _buildLogTile(LogEntry log) {
+    final color = _getLogColor(log.type);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.15)),
+      ),
+      child: ListTile(
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(_getLogIcon(log.type), color: color, size: 20),
+        ),
+        title: Text(
+          log.formattedData,
+          style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+        ),
+        subtitle: Text(
+          '${log.formattedDate} at ${log.formattedTime}',
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+        ),
+        trailing: IconButton(
+          icon: Icon(Icons.delete_outline, color: Colors.grey.shade400, size: 20),
+          onPressed: () => _deleteLog(log.id),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.note_add_outlined, size: 48, color: Colors.grey.shade300),
+          const SizedBox(height: 12),
+          Text(
+            'No entries yet today.\nTap "Add New Entry" to start logging.',
+            style: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off, size: 48, color: Colors.grey.shade400),
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: TextStyle(color: Colors.grey.shade500),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: _fetchLogs,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

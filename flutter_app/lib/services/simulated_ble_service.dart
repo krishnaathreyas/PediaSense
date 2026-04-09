@@ -44,19 +44,19 @@ class SimulatedBleService {
   }
 
   void _generateAndPublish() {
-    // ── Check if we should trigger an anomaly episode (~every 30 ticks = 60s)
-    if (!_inAnomalyEpisode && _tick > 10 && _tick % 30 == 0) {
-      _inAnomalyEpisode = true;
-      _anomalyTicksLeft = 5 + _rng.nextInt(3); // 10-16 seconds
-      _anomalyType = ['tachycardia', 'desaturation', 'tachypnea', 'fever'][
-          _rng.nextInt(4)];
+    // ── Persistent AMBER/RED for testing: start anomaly early, keep it going
+    // After tick 5 (~10s), anomalies run continuously, cycling every 15 ticks
+    if (_tick >= 5) {
+      if (!_inAnomalyEpisode || _anomalyTicksLeft <= 0) {
+        _inAnomalyEpisode = true;
+        _anomalyTicksLeft = 12 + _rng.nextInt(5); // ~24-34 seconds per anomaly
+        _anomalyType = ['tachycardia', 'desaturation', 'tachypnea', 'fever'][
+            _rng.nextInt(4)];
+      }
     }
 
     if (_inAnomalyEpisode) {
       _anomalyTicksLeft--;
-      if (_anomalyTicksLeft <= 0) {
-        _inAnomalyEpisode = false;
-      }
     }
 
     // ── Generate vitals with sinusoidal drift + noise

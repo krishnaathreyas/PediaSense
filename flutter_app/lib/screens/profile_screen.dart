@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../theme/app_theme.dart';
 import '../models/baby_profile.dart';
 
@@ -30,6 +32,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _handleLogout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.errorMain),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    await Supabase.instance.client.auth.signOut();
     await BabyProfile.clear();
     if (mounted) {
       Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
@@ -72,7 +96,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             style: Theme.of(context)
                                 .textTheme
                                 .headlineMedium),
-                        Text('caregiver@example.com',
+                        Text(
+                            Supabase.instance.client.auth.currentUser?.email ??
+                                'Not signed in',
                             style:
                                 Theme.of(context).textTheme.bodyMedium),
                       ],

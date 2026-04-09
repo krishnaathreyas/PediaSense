@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+
 import '../theme/app_theme.dart';
+import '../services/vitals_trends_service.dart';
+import '../services/care_log_service.dart';
+import '../models/log_entry.dart';
 
 class TrendsScreen extends StatefulWidget {
   const TrendsScreen({super.key});
@@ -10,216 +14,598 @@ class TrendsScreen extends StatefulWidget {
 }
 
 class _TrendsScreenState extends State<TrendsScreen> {
+  final _trendsService = VitalsTrendsService.instance;
+  final _careLogService = CareLogService.instance;
+
   String _timeRange = '7d';
+  bool _isLoading = true;
+  String? _error;
 
-  // Mock data
-  final List<Map<String, dynamic>> _breathingData = [
-    {'time': 'Mon', 'rate': 28.0},
-    {'time': 'Tue', 'rate': 26.0},
-    {'time': 'Wed', 'rate': 30.0},
-    {'time': 'Thu', 'rate': 29.0},
-    {'time': 'Fri', 'rate': 27.0},
-    {'time': 'Sat', 'rate': 31.0},
-    {'time': 'Sun', 'rate': 28.0},
-  ];
+  // ── Fetched data ──
+  List<HourlyVitals> _vitals = [];
+  List<Map<String, dynamic>> _dailyVitals = [];
+  List<Map<String, dynamic>> _hydrationData = [];
+  List<Map<String, String>> _insights = [];
 
-  final List<Map<String, dynamic>> _heartRateData = [
-    {'time': '6 AM', 'hr': 108.0},
-    {'time': '9 AM', 'hr': 112.0},
-    {'time': '12 PM', 'hr': 115.0},
-    {'time': '3 PM', 'hr': 110.0},
-    {'time': '6 PM', 'hr': 118.0},
-    {'time': '9 PM', 'hr': 105.0},
-  ];
+  @override
+  void initState() {
+    super.initState();
+    // Start simulation so data gets generated
+    _trendsService.startSimulation();
+    _fetchData();
+  }
 
-  final List<Map<String, dynamic>> _activityData = [
-    {'hour': '12AM', 'sleep': 60.0, 'active': 0.0, 'feeding': 0.0},
-    {'hour': '2AM', 'sleep': 60.0, 'active': 0.0, 'feeding': 0.0},
-    {'hour': '4AM', 'sleep': 50.0, 'active': 0.0, 'feeding': 10.0},
-    {'hour': '6AM', 'sleep': 40.0, 'active': 10.0, 'feeding': 10.0},
-    {'hour': '8AM', 'sleep': 20.0, 'active': 30.0, 'feeding': 10.0},
-    {'hour': '10AM', 'sleep': 40.0, 'active': 15.0, 'feeding': 5.0},
-    {'hour': '12PM', 'sleep': 30.0, 'active': 20.0, 'feeding': 10.0},
-    {'hour': '2PM', 'sleep': 50.0, 'active': 5.0, 'feeding': 5.0},
-    {'hour': '4PM', 'sleep': 20.0, 'active': 30.0, 'feeding': 10.0},
-    {'hour': '6PM', 'sleep': 10.0, 'active': 40.0, 'feeding': 10.0},
-    {'hour': '8PM', 'sleep': 40.0, 'active': 15.0, 'feeding': 5.0},
-    {'hour': '10PM', 'sleep': 55.0, 'active': 5.0, 'feeding': 0.0},
-  ];
+  @override
+  void dispose() {
+    super.dispose();
+  }
 
-  final List<Map<String, dynamic>> _hydrationData = [
-    {'day': 'Mon', 'wet_diapers': 7.0, 'feeding_sessions': 8.0},
-    {'day': 'Tue', 'wet_diapers': 6.0, 'feeding_sessions': 7.0},
-    {'day': 'Wed', 'wet_diapers': 8.0, 'feeding_sessions': 9.0},
-    {'day': 'Thu', 'wet_diapers': 7.0, 'feeding_sessions': 8.0},
-    {'day': 'Fri', 'wet_diapers': 6.0, 'feeding_sessions': 7.0},
-    {'day': 'Sat', 'wet_diapers': 7.0, 'feeding_sessions': 8.0},
-    {'day': 'Sun', 'wet_diapers': 8.0, 'feeding_sessions': 9.0},
-  ];
+  // ── Data fetching ─────────────────────────────────────────────────────────
+
+  Future<void> _fetchData() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      // Fetch vitals from Supabase based on time range
+      List<HourlyVitals> vitals;
+      if (_timeRange == '24h') {
+        vitals = await _trendsService.fetchHourly(hours: 24);
+      } else if (_timeRange == '7d') {
+        vitals = await _trendsService.fetchDays(days: 7);
+      } else {
+        vitals = await _trendsService.fetchDays(days: 30);
+      }
+
+      // If no remote data, try local
+      if (vitals.isEmpty) {
+        vitals = await _trendsService.getLocalVitals();
+      }
+
+      // Group by day for daily charts
+      final daily = VitalsTrendsService.groupByDay(vitals);
+
+      // Fetch today's care logs for hydration/feeding
+      List<LogEntry> todayLogs = [];
+      try {
+        todayLogs = await _careLogService.fetchTodayLogs();
+      } catch (_) {}
+
+      final diaperCount =
+          todayLogs.where((l) => l.type == LogType.diaper).length;
+      final feedingCount =
+          todayLogs.where((l) => l.type == LogType.feeding).length;
+
+      // Build hydration data from care_logs (last 7 days)
+      List<Map<String, dynamic>> hydration = [];
+      try {
+        final weekLogs = await _careLogService.fetchTodayLogs();
+        // Group today's logs
+        hydration = [
+          {
+            'day': 'Today',
+            'wet_diapers': weekLogs
+                .where((l) => l.type == LogType.diaper)
+                .length
+                .toDouble(),
+            'feeding_sessions': weekLogs
+                .where((l) => l.type == LogType.feeding)
+                .length
+                .toDouble(),
+          }
+        ];
+      } catch (_) {}
+
+      // Generate dynamic insights
+      final insights = VitalsTrendsService.generateInsights(
+        vitals,
+        diaperCount: diaperCount,
+        feedingCount: feedingCount,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _vitals = vitals;
+        _dailyVitals = daily;
+        _hydrationData = hydration;
+        _insights = insights;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = 'Failed to load trends. Pull down to retry.';
+      });
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  //  BUILD
+  // ═════════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Text('Health Trends',
-              style: Theme.of(context).textTheme.headlineLarge),
-          const SizedBox(height: 8),
-          Text("Visualize your baby's health patterns over time",
-              style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: 20),
+    return RefreshIndicator(
+      onRefresh: _fetchData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Text('Health Trends',
+                style: Theme.of(context).textTheme.headlineLarge),
+            const SizedBox(height: 8),
+            Text("Visualize your baby's health patterns over time",
+                style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(height: 20),
 
-          // Time Range Selector
-          Center(
-            child: ToggleButtons(
-              isSelected: [
-                _timeRange == '24h',
-                _timeRange == '7d',
-                _timeRange == '30d',
-              ],
-              onPressed: (index) {
-                setState(() {
-                  _timeRange = ['24h', '7d', '30d'][index];
-                });
-              },
-              borderRadius: BorderRadius.circular(8),
-              selectedColor: Colors.white,
-              fillColor: AppTheme.primaryMain,
-              color: AppTheme.textSecondary,
-              constraints:
-                  const BoxConstraints(minWidth: 80, minHeight: 36),
-              children: const [
-                Text('24 Hours', style: TextStyle(fontSize: 12)),
-                Text('7 Days', style: TextStyle(fontSize: 12)),
-                Text('30 Days', style: TextStyle(fontSize: 12)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Breathing Regularity Chart
-          _buildChartCard(
-            title: 'Breathing Regularity',
-            subtitle:
-                'Average breathing rate per day (normal range: 25-35 breaths/min)',
-            child: SizedBox(
-              height: 220,
-              child: _buildBreathingChart(),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Heart Rate Trend
-          _buildChartCard(
-            title: 'Heart Rate Trend',
-            subtitle:
-                "Today's heart rate measurements (normal: 100-130 bpm)",
-            child: SizedBox(
-              height: 180,
-              child: _buildHeartRateChart(),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Activity Patterns
-          _buildChartCard(
-            title: '24-Hour Activity Pattern',
-            subtitle:
-                'Distribution of sleep, active time, and feeding',
-            child: Column(
-              children: [
-                SizedBox(
-                  height: 220,
-                  child: _buildActivityChart(),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _legendItem('Sleep', AppTheme.primaryMain),
-                    const SizedBox(width: 16),
-                    _legendItem('Active', AppTheme.successMain),
-                    const SizedBox(width: 16),
-                    _legendItem('Feeding', AppTheme.warningMain),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Hydration & Feeding Trends
-          _buildChartCard(
-            title: 'Hydration & Feeding Trends',
-            subtitle: 'Daily wet diapers and feeding sessions',
-            child: Column(
-              children: [
-                SizedBox(
-                  height: 180,
-                  child: _buildHydrationChart(),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _legendItem('Wet Diapers', AppTheme.infoMain),
-                    const SizedBox(width: 16),
-                    _legendItem('Feeding Sessions', AppTheme.warningMain),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Weekly Insights
-          Card(
-            color: AppTheme.primaryLight.withValues(alpha: 0.1),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(
-                  color: AppTheme.primaryLight.withValues(alpha: 0.3)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Weekly Insights',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.primaryDark,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  _insightItem(
-                    'Breathing:',
-                    'Consistent pattern within normal range. No concerning fluctuations detected.',
-                  ),
-                  const SizedBox(height: 8),
-                  _insightItem(
-                    'Activity:',
-                    'Good sleep-wake cycle with 14-16 hours of sleep per day (expected for age).',
-                  ),
-                  const SizedBox(height: 8),
-                  _insightItem(
-                    'Hydration:',
-                    'Average of 7 wet diapers per day indicates adequate hydration.',
-                  ),
+            // Time Range Selector
+            Center(
+              child: ToggleButtons(
+                isSelected: [
+                  _timeRange == '24h',
+                  _timeRange == '7d',
+                  _timeRange == '30d',
+                ],
+                onPressed: (index) {
+                  setState(() {
+                    _timeRange = ['24h', '7d', '30d'][index];
+                  });
+                  _fetchData();
+                },
+                borderRadius: BorderRadius.circular(8),
+                selectedColor: Colors.white,
+                fillColor: AppTheme.primaryMain,
+                color: AppTheme.textSecondary,
+                constraints:
+                    const BoxConstraints(minWidth: 80, minHeight: 36),
+                children: const [
+                  Text('24 Hours', style: TextStyle(fontSize: 12)),
+                  Text('7 Days', style: TextStyle(fontSize: 12)),
+                  Text('30 Days', style: TextStyle(fontSize: 12)),
                 ],
               ),
             ),
+            const SizedBox(height: 24),
+
+            // ── Content ──
+            if (_isLoading)
+              const SizedBox(
+                height: 300,
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_error != null)
+              _buildErrorState()
+            else if (_vitals.isEmpty)
+              _buildEmptyState()
+            else ...[
+              // Heart Rate Chart
+              _buildChartCard(
+                title: 'Heart Rate Trend',
+                subtitle: _timeRange == '24h'
+                    ? 'Hourly avg heart rate (normal: 100-130 bpm)'
+                    : 'Daily avg heart rate (normal: 100-130 bpm)',
+                child: SizedBox(
+                  height: 200,
+                  child: _timeRange == '24h'
+                      ? _buildHourlyHrChart()
+                      : _buildDailyHrChart(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Breathing Chart
+              _buildChartCard(
+                title: 'Breathing Regularity',
+                subtitle: _timeRange == '24h'
+                    ? 'Hourly avg breathing rate (normal: 25-35/min)'
+                    : 'Daily avg breathing rate (normal: 25-35/min)',
+                child: SizedBox(
+                  height: 200,
+                  child: _timeRange == '24h'
+                      ? _buildHourlyBrChart()
+                      : _buildDailyBrChart(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Hydration & Feeding
+              if (_hydrationData.isNotEmpty) ...[
+                _buildChartCard(
+                  title: 'Hydration & Feeding',
+                  subtitle: "Today's diaper and feeding counts",
+                  child: _buildHydrationSummary(),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // Insights
+              _buildInsightsCard(),
+            ],
+
+            const SizedBox(height: 80),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Charts ──────────────────────────────────────────────────────────────
+
+  Widget _buildHourlyHrChart() {
+    if (_vitals.isEmpty) return _chartEmpty();
+    return LineChart(
+      LineChartData(
+        gridData: _defaultGrid(),
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              interval: (_vitals.length / 6).ceilToDouble().clamp(1, 10),
+              getTitlesWidget: (value, meta) {
+                final idx = value.toInt();
+                if (idx >= 0 && idx < _vitals.length) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '${_vitals[idx].hourStart.hour}:00',
+                      style: const TextStyle(fontSize: 9),
+                    ),
+                  );
+                }
+                return const SizedBox.shrink();
+              },
+              reservedSize: 28,
+            ),
           ),
-          const SizedBox(height: 80),
+          leftTitles: _leftTitles(interval: 10),
+          topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false)),
+        ),
+        minY: 80,
+        maxY: 150,
+        borderData: FlBorderData(show: false),
+        rangeAnnotations: RangeAnnotations(
+          horizontalRangeAnnotations: [
+            HorizontalRangeAnnotation(
+              y1: 100,
+              y2: 130,
+              color: AppTheme.successMain.withValues(alpha: 0.08),
+            ),
+          ],
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: _vitals
+                .asMap()
+                .entries
+                .map((e) => FlSpot(e.key.toDouble(), e.value.avgHr))
+                .toList(),
+            isCurved: true,
+            color: AppTheme.errorMain,
+            barWidth: 2,
+            dotData: FlDotData(
+              show: _vitals.length <= 30,
+              getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                radius: 3,
+                color: AppTheme.errorMain,
+                strokeWidth: 0,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
+
+  Widget _buildDailyHrChart() {
+    if (_dailyVitals.isEmpty) return _chartEmpty();
+    return LineChart(
+      LineChartData(
+        gridData: _defaultGrid(),
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                final idx = value.toInt();
+                if (idx >= 0 && idx < _dailyVitals.length) {
+                  final parts =
+                      (_dailyVitals[idx]['date'] as String).split('-');
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text('${parts[2]}/${parts[1]}',
+                        style: const TextStyle(fontSize: 9)),
+                  );
+                }
+                return const SizedBox.shrink();
+              },
+              reservedSize: 28,
+            ),
+          ),
+          leftTitles: _leftTitles(interval: 10),
+          topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false)),
+        ),
+        minY: 80,
+        maxY: 150,
+        borderData: FlBorderData(show: false),
+        rangeAnnotations: RangeAnnotations(
+          horizontalRangeAnnotations: [
+            HorizontalRangeAnnotation(
+              y1: 100,
+              y2: 130,
+              color: AppTheme.successMain.withValues(alpha: 0.08),
+            ),
+          ],
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: _dailyVitals
+                .asMap()
+                .entries
+                .map((e) =>
+                    FlSpot(e.key.toDouble(), (e.value['avgHr'] as num).toDouble()))
+                .toList(),
+            isCurved: true,
+            color: AppTheme.errorMain,
+            barWidth: 3,
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                radius: 4,
+                color: AppTheme.errorMain,
+                strokeWidth: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHourlyBrChart() {
+    if (_vitals.isEmpty) return _chartEmpty();
+    return LineChart(
+      LineChartData(
+        gridData: _defaultGrid(),
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              interval: (_vitals.length / 6).ceilToDouble().clamp(1, 10),
+              getTitlesWidget: (value, meta) {
+                final idx = value.toInt();
+                if (idx >= 0 && idx < _vitals.length) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '${_vitals[idx].hourStart.hour}:00',
+                      style: const TextStyle(fontSize: 9),
+                    ),
+                  );
+                }
+                return const SizedBox.shrink();
+              },
+              reservedSize: 28,
+            ),
+          ),
+          leftTitles: _leftTitles(interval: 5),
+          topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false)),
+        ),
+        minY: 15,
+        maxY: 45,
+        borderData: FlBorderData(show: false),
+        rangeAnnotations: RangeAnnotations(
+          horizontalRangeAnnotations: [
+            HorizontalRangeAnnotation(
+              y1: 25,
+              y2: 35,
+              color: AppTheme.successMain.withValues(alpha: 0.08),
+            ),
+          ],
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: _vitals
+                .asMap()
+                .entries
+                .map((e) => FlSpot(e.key.toDouble(), e.value.avgBr))
+                .toList(),
+            isCurved: true,
+            color: AppTheme.successMain,
+            barWidth: 2,
+            dotData: FlDotData(
+              show: _vitals.length <= 30,
+              getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                radius: 3,
+                color: AppTheme.successMain,
+                strokeWidth: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDailyBrChart() {
+    if (_dailyVitals.isEmpty) return _chartEmpty();
+    return LineChart(
+      LineChartData(
+        gridData: _defaultGrid(),
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                final idx = value.toInt();
+                if (idx >= 0 && idx < _dailyVitals.length) {
+                  final parts =
+                      (_dailyVitals[idx]['date'] as String).split('-');
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text('${parts[2]}/${parts[1]}',
+                        style: const TextStyle(fontSize: 9)),
+                  );
+                }
+                return const SizedBox.shrink();
+              },
+              reservedSize: 28,
+            ),
+          ),
+          leftTitles: _leftTitles(interval: 5),
+          topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false)),
+        ),
+        minY: 15,
+        maxY: 45,
+        borderData: FlBorderData(show: false),
+        rangeAnnotations: RangeAnnotations(
+          horizontalRangeAnnotations: [
+            HorizontalRangeAnnotation(
+              y1: 25,
+              y2: 35,
+              color: AppTheme.successMain.withValues(alpha: 0.08),
+            ),
+          ],
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: _dailyVitals
+                .asMap()
+                .entries
+                .map((e) =>
+                    FlSpot(e.key.toDouble(), (e.value['avgBr'] as num).toDouble()))
+                .toList(),
+            isCurved: true,
+            color: AppTheme.successMain,
+            barWidth: 3,
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                radius: 4,
+                color: AppTheme.successMain,
+                strokeWidth: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Hydration summary ────────────────────────────────────────────────────
+
+  Widget _buildHydrationSummary() {
+    final data = _hydrationData.isNotEmpty ? _hydrationData.first : {};
+    final diapers = (data['wet_diapers'] as num?)?.toInt() ?? 0;
+    final feedings = (data['feeding_sessions'] as num?)?.toInt() ?? 0;
+
+    return Row(
+      children: [
+        Expanded(
+          child: _statCard(
+            icon: Icons.water_drop,
+            label: 'Wet Diapers',
+            value: '$diapers',
+            color: AppTheme.infoMain,
+            status: diapers >= 6 ? 'Adequate' : 'Low',
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _statCard(
+            icon: Icons.restaurant,
+            label: 'Feedings',
+            value: '$feedings',
+            color: AppTheme.warningMain,
+            status: 'Today',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _statCard({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+    required String status,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.15)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: 8),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 28, fontWeight: FontWeight.bold, color: color)),
+          const SizedBox(height: 4),
+          Text(label, style: const TextStyle(fontSize: 12)),
+          Text(status,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+        ],
+      ),
+    );
+  }
+
+  // ── Insights card ───────────────────────────────────────────────────────
+
+  Widget _buildInsightsCard() {
+    return Card(
+      color: AppTheme.primaryLight.withValues(alpha: 0.1),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+            color: AppTheme.primaryLight.withValues(alpha: 0.3)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Insights',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.primaryDark,
+              ),
+            ),
+            const SizedBox(height: 12),
+            ..._insights.map((i) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _insightItem(i['label']!, i['text']!),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Shared helpers ──────────────────────────────────────────────────────
 
   Widget _buildChartCard({
     required String title,
@@ -245,24 +631,6 @@ class _TrendsScreenState extends State<TrendsScreen> {
     );
   }
 
-  Widget _legendItem(String label, Color color) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 11)),
-      ],
-    );
-  }
-
   Widget _insightItem(String boldText, String normalText) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -271,7 +639,8 @@ class _TrendsScreenState extends State<TrendsScreen> {
         Expanded(
           child: RichText(
             text: TextSpan(
-              style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+              style: const TextStyle(
+                  fontSize: 13, color: AppTheme.textSecondary),
               children: [
                 TextSpan(
                   text: boldText,
@@ -286,334 +655,96 @@ class _TrendsScreenState extends State<TrendsScreen> {
     );
   }
 
-  // ── Charts ──
+  FlGridData _defaultGrid() {
+    return FlGridData(
+      show: true,
+      drawVerticalLine: false,
+      horizontalInterval: 10,
+      getDrawingHorizontalLine: (value) => FlLine(
+        color: Colors.grey.shade200,
+        strokeWidth: 1,
+      ),
+    );
+  }
 
-  Widget _buildBreathingChart() {
-    return LineChart(
-      LineChartData(
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          horizontalInterval: 5,
-          getDrawingHorizontalLine: (value) => FlLine(
-            color: Colors.grey.shade200,
-            strokeWidth: 1,
-          ),
+  AxisTitles _leftTitles({double interval = 10}) {
+    return AxisTitles(
+      sideTitles: SideTitles(
+        showTitles: true,
+        reservedSize: 32,
+        interval: interval,
+        getTitlesWidget: (value, meta) => Text(
+          '${value.toInt()}',
+          style: const TextStyle(fontSize: 10),
         ),
-        titlesData: FlTitlesData(
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, meta) {
-                final idx = value.toInt();
-                if (idx >= 0 && idx < _breathingData.length) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_breathingData[idx]['time'],
-                        style: const TextStyle(fontSize: 10)),
-                  );
-                }
-                return const SizedBox.shrink();
+      ),
+    );
+  }
+
+  Widget _chartEmpty() {
+    return Center(
+      child: Text(
+        'No data for this period',
+        style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return SizedBox(
+      height: 300,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.show_chart, size: 56, color: Colors.grey.shade300),
+            const SizedBox(height: 16),
+            Text(
+              'No trend data yet',
+              style: TextStyle(
+                  fontSize: 16, color: Colors.grey.shade500,
+                  fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Vitals will appear here as your device\ncollects data over time.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            OutlinedButton(
+              onPressed: () async {
+                await _trendsService.triggerAggregation();
+                _fetchData();
               },
-              reservedSize: 28,
-            ),
-          ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 32,
-              interval: 5,
-              getTitlesWidget: (value, meta) => Text(
-                '${value.toInt()}',
-                style: const TextStyle(fontSize: 10),
-              ),
-            ),
-          ),
-          topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
-        ),
-        minY: 20,
-        maxY: 40,
-        borderData: FlBorderData(show: false),
-        // Normal range shading
-        rangeAnnotations: RangeAnnotations(
-          horizontalRangeAnnotations: [
-            HorizontalRangeAnnotation(
-              y1: 25,
-              y2: 35,
-              color: AppTheme.successMain.withValues(alpha: 0.08),
+              child: const Text('Generate Test Data'),
             ),
           ],
         ),
-        lineBarsData: [
-          LineChartBarData(
-            spots: _breathingData
-                .asMap()
-                .entries
-                .map((e) => FlSpot(e.key.toDouble(), e.value['rate']))
-                .toList(),
-            isCurved: true,
-            color: AppTheme.successMain,
-            barWidth: 3,
-            dotData: FlDotData(
-              show: true,
-              getDotPainter: (spot, percent, bar, index) =>
-                  FlDotCirclePainter(
-                radius: 4,
-                color: AppTheme.successMain,
-                strokeWidth: 0,
-              ),
-            ),
-            belowBarData: BarAreaData(show: false),
-          ),
-        ],
       ),
     );
   }
 
-  Widget _buildHeartRateChart() {
-    return LineChart(
-      LineChartData(
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          horizontalInterval: 5,
-          getDrawingHorizontalLine: (value) => FlLine(
-            color: Colors.grey.shade200,
-            strokeWidth: 1,
-          ),
+  Widget _buildErrorState() {
+    return SizedBox(
+      height: 300,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off, size: 48, color: Colors.grey.shade400),
+            const SizedBox(height: 12),
+            Text(_error!,
+                style: TextStyle(color: Colors.grey.shade500),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: _fetchData,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Retry'),
+            ),
+          ],
         ),
-        titlesData: FlTitlesData(
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, meta) {
-                final idx = value.toInt();
-                if (idx >= 0 && idx < _heartRateData.length) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_heartRateData[idx]['time'],
-                        style: const TextStyle(fontSize: 9)),
-                  );
-                }
-                return const SizedBox.shrink();
-              },
-              reservedSize: 28,
-            ),
-          ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 32,
-              interval: 5,
-              getTitlesWidget: (value, meta) => Text(
-                '${value.toInt()}',
-                style: const TextStyle(fontSize: 10),
-              ),
-            ),
-          ),
-          topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
-        ),
-        minY: 95,
-        maxY: 125,
-        borderData: FlBorderData(show: false),
-        lineBarsData: [
-          LineChartBarData(
-            spots: _heartRateData
-                .asMap()
-                .entries
-                .map((e) => FlSpot(e.key.toDouble(), e.value['hr']))
-                .toList(),
-            isCurved: true,
-            color: AppTheme.errorMain,
-            barWidth: 2,
-            dotData: FlDotData(
-              show: true,
-              getDotPainter: (spot, percent, bar, index) =>
-                  FlDotCirclePainter(
-                radius: 5,
-                color: AppTheme.errorMain,
-                strokeWidth: 0,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActivityChart() {
-    return BarChart(
-      BarChartData(
-        alignment: BarChartAlignment.spaceAround,
-        barTouchData: BarTouchData(enabled: false),
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          horizontalInterval: 20,
-          getDrawingHorizontalLine: (value) => FlLine(
-            color: Colors.grey.shade200,
-            strokeWidth: 1,
-          ),
-        ),
-        titlesData: FlTitlesData(
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, meta) {
-                final idx = value.toInt();
-                if (idx >= 0 && idx < _activityData.length) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_activityData[idx]['hour'],
-                        style: const TextStyle(fontSize: 8)),
-                  );
-                }
-                return const SizedBox.shrink();
-              },
-              reservedSize: 28,
-            ),
-          ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 28,
-              interval: 20,
-              getTitlesWidget: (value, meta) => Text(
-                '${value.toInt()}',
-                style: const TextStyle(fontSize: 10),
-              ),
-            ),
-          ),
-          topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
-        ),
-        borderData: FlBorderData(show: false),
-        barGroups: _activityData.asMap().entries.map((entry) {
-          final d = entry.value;
-          return BarChartGroupData(
-            x: entry.key,
-            barRods: [
-              BarChartRodData(
-                toY: d['sleep'] + d['active'] + d['feeding'],
-                width: 14,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(4),
-                  topRight: Radius.circular(4),
-                ),
-                rodStackItems: [
-                  BarChartRodStackItem(0, d['sleep'], AppTheme.primaryMain),
-                  BarChartRodStackItem(d['sleep'],
-                      d['sleep'] + d['active'], AppTheme.successMain),
-                  BarChartRodStackItem(d['sleep'] + d['active'],
-                      d['sleep'] + d['active'] + d['feeding'], AppTheme.warningMain),
-                ],
-              ),
-            ],
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildHydrationChart() {
-    return LineChart(
-      LineChartData(
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          horizontalInterval: 2,
-          getDrawingHorizontalLine: (value) => FlLine(
-            color: Colors.grey.shade200,
-            strokeWidth: 1,
-          ),
-        ),
-        titlesData: FlTitlesData(
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, meta) {
-                final idx = value.toInt();
-                if (idx >= 0 && idx < _hydrationData.length) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_hydrationData[idx]['day'],
-                        style: const TextStyle(fontSize: 10)),
-                  );
-                }
-                return const SizedBox.shrink();
-              },
-              reservedSize: 28,
-            ),
-          ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 28,
-              interval: 2,
-              getTitlesWidget: (value, meta) => Text(
-                '${value.toInt()}',
-                style: const TextStyle(fontSize: 10),
-              ),
-            ),
-          ),
-          topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
-        ),
-        minY: 4,
-        maxY: 12,
-        borderData: FlBorderData(show: false),
-        lineBarsData: [
-          LineChartBarData(
-            spots: _hydrationData
-                .asMap()
-                .entries
-                .map((e) =>
-                    FlSpot(e.key.toDouble(), e.value['wet_diapers']))
-                .toList(),
-            isCurved: true,
-            color: AppTheme.infoMain,
-            barWidth: 2,
-            dotData: FlDotData(
-              show: true,
-              getDotPainter: (spot, percent, bar, index) =>
-                  FlDotCirclePainter(
-                radius: 4,
-                color: AppTheme.infoMain,
-                strokeWidth: 0,
-              ),
-            ),
-          ),
-          LineChartBarData(
-            spots: _hydrationData
-                .asMap()
-                .entries
-                .map((e) =>
-                    FlSpot(e.key.toDouble(), e.value['feeding_sessions']))
-                .toList(),
-            isCurved: true,
-            color: AppTheme.warningMain,
-            barWidth: 2,
-            dotData: FlDotData(
-              show: true,
-              getDotPainter: (spot, percent, bar, index) =>
-                  FlDotCirclePainter(
-                radius: 4,
-                color: AppTheme.warningMain,
-                strokeWidth: 0,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
