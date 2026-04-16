@@ -15,8 +15,15 @@ class _CaregiverSetupScreenState extends State<CaregiverSetupScreen> {
   String _ageMonths = '12';
   final _weightController = TextEditingController();
   bool _isLowBirthWeight = false;
+  bool _isLoadingProfile = true;
 
   final List<String> _steps = ['Baby Information', 'Health Settings'];
+
+  @override
+  void initState() {
+    super.initState();
+    _checkExistingProfileAndRoute();
+  }
 
   @override
   void dispose() {
@@ -27,11 +34,31 @@ class _CaregiverSetupScreenState extends State<CaregiverSetupScreen> {
 
   bool get _isStepValid {
     if (_activeStep == 0) {
+      final parsedAge = int.tryParse(_ageMonths);
+      final parsedWeight = double.tryParse(_weightController.text);
       return _babyNameController.text.trim().isNotEmpty &&
-          _ageMonths.isNotEmpty &&
-          _weightController.text.isNotEmpty;
+          parsedAge != null &&
+          parsedAge >= 12 &&
+          parsedAge <= 24 &&
+          parsedWeight != null &&
+          parsedWeight > 0 &&
+          parsedWeight <= 30;
     }
     return true;
+  }
+
+  Future<void> _checkExistingProfileAndRoute() async {
+    final hasProfile = await BabyProfile.existsForCurrentUser();
+    if (!mounted) return;
+
+    if (hasProfile) {
+      Navigator.pushReplacementNamed(context, '/home');
+      return;
+    }
+
+    setState(() {
+      _isLoadingProfile = false;
+    });
   }
 
   void _handleNext() async {
@@ -62,6 +89,10 @@ class _CaregiverSetupScreenState extends State<CaregiverSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingProfile) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       body: SafeArea(
         child: Center(

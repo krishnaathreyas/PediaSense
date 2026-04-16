@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'theme/app_theme.dart';
+import 'models/baby_profile.dart';
 import 'screens/login_screen.dart';
 import 'screens/caregiver_setup_screen.dart';
 import 'screens/device_connection_screen.dart';
@@ -31,6 +31,7 @@ class PediaSenseApp extends StatelessWidget {
       home: const SplashGate(),
       routes: {
         '/login': (context) => const LoginScreen(),
+        '/gate': (context) => const SplashGate(),
         '/setup': (context) => const CaregiverSetupScreen(),
         '/device': (context) => const DeviceConnectionScreen(),
         '/home': (context) => const MainShell(),
@@ -74,9 +75,8 @@ class _SplashGateState extends State<SplashGate> {
       return;
     }
 
-    // 2. Logged in — check if baby profile exists
-    final prefs = await SharedPreferences.getInstance();
-    final hasProfile = prefs.getString('babyProfile') != null;
+    // 2. Logged in — check if baby profile exists for this user
+    final hasProfile = await BabyProfile.existsForCurrentUser();
 
     if (!mounted) return;
 
@@ -106,15 +106,22 @@ class _SplashGateState extends State<SplashGate> {
                 ),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Icon(Icons.monitor_heart,
-                  size: 42, color: Colors.white),
+              child: const Icon(
+                Icons.monitor_heart,
+                size: 42,
+                color: Colors.white,
+              ),
             ),
             const SizedBox(height: 20),
-            Text('PediaSense',
-                style: Theme.of(context).textTheme.headlineLarge),
+            Text(
+              'PediaSense',
+              style: Theme.of(context).textTheme.headlineLarge,
+            ),
             const SizedBox(height: 8),
-            Text('Smart Health Monitoring',
-                style: Theme.of(context).textTheme.bodyMedium),
+            Text(
+              'Smart Health Monitoring',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
             const SizedBox(height: 32),
             const CircularProgressIndicator(),
           ],

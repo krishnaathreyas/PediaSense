@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -100,8 +102,8 @@ class _LoginScreenState extends State<LoginScreen> {
             );
             setState(() => _isSignup = false); // Switch to login mode
           } else {
-            // Auto-confirmed — proceed to setup
-            Navigator.pushReplacementNamed(context, '/setup');
+            // Auto-confirmed — let gate decide setup vs home
+            Navigator.pushReplacementNamed(context, '/gate');
           }
         }
       } else {
@@ -112,17 +114,25 @@ class _LoginScreenState extends State<LoginScreen> {
         );
 
         if (!mounted) return;
-        Navigator.pushReplacementNamed(context, '/setup');
+        Navigator.pushReplacementNamed(context, '/gate');
       }
     } on AuthException catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMsg = _friendlyAuthError(e.message);
       });
+    } on SocketException {
+      if (!mounted) return;
+      setState(() {
+        _errorMsg =
+            'No internet connection. Please check your network and try again.';
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorMsg = 'Something went wrong. Please try again.';
+        _errorMsg = _friendlyAuthError(
+          e.toString().replaceFirst('Exception: ', ''),
+        );
       });
     } finally {
       if (mounted) {
@@ -134,7 +144,9 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleForgotPassword() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
-      setState(() => _errorMsg = 'Enter your email first, then tap "Forgot Password"');
+      setState(
+        () => _errorMsg = 'Enter your email first, then tap "Forgot Password"',
+      );
       return;
     }
 
@@ -153,9 +165,18 @@ class _LoginScreenState extends State<LoginScreen> {
     } on AuthException catch (e) {
       if (!mounted) return;
       setState(() => _errorMsg = _friendlyAuthError(e.message));
+    } on SocketException {
+      if (!mounted) return;
+      setState(() {
+        _errorMsg =
+            'No internet connection. Please check your network and try again.';
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _errorMsg = 'Failed to send reset email. Try again.');
+      setState(() {
+        _errorMsg =
+            'Failed to send reset email. Check your network and try again.';
+      });
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -178,6 +199,13 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     if (lower.contains('weak password')) {
       return 'Password is too weak. Use at least 6 characters.';
+    }
+    if (lower.contains('failed host lookup') ||
+        lower.contains('socketexception') ||
+        lower.contains('no address associated with hostname') ||
+        lower.contains('network') ||
+        lower.contains('timed out')) {
+      return 'Network is unavailable. Please connect to the internet and try again.';
     }
     return message;
   }
@@ -237,12 +265,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ],
                   ),
-                  child: const Icon(Icons.monitor_heart,
-                      size: 42, color: Colors.white),
+                  child: const Icon(
+                    Icons.monitor_heart,
+                    size: 42,
+                    color: Colors.white,
+                  ),
                 ),
                 const SizedBox(height: 20),
-                Text('PediaSense',
-                    style: Theme.of(context).textTheme.headlineLarge),
+                Text(
+                  'PediaSense',
+                  style: Theme.of(context).textTheme.headlineLarge,
+                ),
                 const SizedBox(height: 6),
                 Text(
                   'Smart Health Monitoring for Your Baby',
@@ -280,24 +313,31 @@ class _LoginScreenState extends State<LoginScreen> {
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: AppTheme.errorMain
-                                    .withValues(alpha: 0.08),
+                                color: AppTheme.errorMain.withValues(
+                                  alpha: 0.08,
+                                ),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                    color: AppTheme.errorMain
-                                        .withValues(alpha: 0.3)),
+                                  color: AppTheme.errorMain.withValues(
+                                    alpha: 0.3,
+                                  ),
+                                ),
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.error_outline,
-                                      size: 18, color: AppTheme.errorMain),
+                                  const Icon(
+                                    Icons.error_outline,
+                                    size: 18,
+                                    color: AppTheme.errorMain,
+                                  ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
                                       _errorMsg!,
                                       style: const TextStyle(
-                                          fontSize: 13,
-                                          color: AppTheme.errorMain),
+                                        fontSize: 13,
+                                        color: AppTheme.errorMain,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -314,8 +354,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             autocorrect: false,
                             decoration: const InputDecoration(
                               labelText: 'Email',
-                              prefixIcon:
-                                  Icon(Icons.email_outlined, size: 20),
+                              prefixIcon: Icon(Icons.email_outlined, size: 20),
                             ),
                             validator: _validateEmail,
                           ),
@@ -330,8 +369,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                 : TextInputAction.done,
                             decoration: InputDecoration(
                               labelText: 'Password',
-                              prefixIcon:
-                                  const Icon(Icons.lock_outlined, size: 20),
+                              prefixIcon: const Icon(
+                                Icons.lock_outlined,
+                                size: 20,
+                              ),
                               suffixIcon: IconButton(
                                 icon: Icon(
                                   _obscurePassword
@@ -340,11 +381,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                   size: 20,
                                 ),
                                 onPressed: () => setState(
-                                    () => _obscurePassword = !_obscurePassword),
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
                               ),
                             ),
                             validator: _validatePassword,
-                            onFieldSubmitted: _isSignup ? null : (_) => _handleSubmit(),
+                            onFieldSubmitted: _isSignup
+                                ? null
+                                : (_) => _handleSubmit(),
                           ),
 
                           // ── Confirm password (sign up only) ──
@@ -356,8 +400,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               textInputAction: TextInputAction.done,
                               decoration: const InputDecoration(
                                 labelText: 'Confirm Password',
-                                prefixIcon:
-                                    Icon(Icons.lock_outlined, size: 20),
+                                prefixIcon: Icon(Icons.lock_outlined, size: 20),
                               ),
                               validator: _validateConfirmPassword,
                               onFieldSubmitted: (_) => _handleSubmit(),
@@ -394,7 +437,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                       color: Colors.white,
                                     ),
                                   )
-                                : Text(_isSignup ? 'Create Account' : 'Sign In'),
+                                : Text(
+                                    _isSignup ? 'Create Account' : 'Sign In',
+                                  ),
                           ),
                           const SizedBox(height: 16),
 
@@ -406,20 +451,20 @@ class _LoginScreenState extends State<LoginScreen> {
                                 _isSignup
                                     ? 'Already have an account?'
                                     : "Don't have an account?",
-                                style:
-                                    Theme.of(context).textTheme.bodySmall,
+                                style: Theme.of(context).textTheme.bodySmall,
                               ),
                               TextButton(
                                 onPressed: _isLoading
                                     ? null
                                     : () => setState(() {
-                                          _isSignup = !_isSignup;
-                                          _errorMsg = null;
-                                        }),
+                                        _isSignup = !_isSignup;
+                                        _errorMsg = null;
+                                      }),
                                 child: Text(
                                   _isSignup ? 'Sign In' : 'Sign Up',
                                   style: const TextStyle(
-                                      fontWeight: FontWeight.w600),
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
                             ],

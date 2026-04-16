@@ -54,7 +54,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (confirm != true || !mounted) return;
 
     await Supabase.instance.client.auth.signOut();
-    await BabyProfile.clear();
     if (mounted) {
       Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
     }
@@ -68,11 +67,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Header
-          Text('Profile',
-              style: Theme.of(context).textTheme.headlineLarge),
+          Text('Profile', style: Theme.of(context).textTheme.headlineLarge),
           const SizedBox(height: 4),
-          Text("Manage your account and baby's information",
-              style: Theme.of(context).textTheme.bodyMedium),
+          Text(
+            "Manage your account and baby's information",
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
           const SizedBox(height: 20),
 
           // User Profile Card
@@ -84,23 +84,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   CircleAvatar(
                     radius: 32,
                     backgroundColor: AppTheme.primaryMain,
-                    child: const Icon(Icons.person,
-                        size: 40, color: Colors.white),
+                    child: const Icon(
+                      Icons.person,
+                      size: 40,
+                      color: Colors.white,
+                    ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Caregiver',
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineMedium),
                         Text(
-                            Supabase.instance.client.auth.currentUser?.email ??
-                                'Not signed in',
-                            style:
-                                Theme.of(context).textTheme.bodyMedium),
+                          'Caregiver',
+                          style: Theme.of(context).textTheme.headlineMedium,
+                        ),
+                        Text(
+                          Supabase.instance.client.auth.currentUser?.email ??
+                              'Not signed in',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
                       ],
                     ),
                   ),
@@ -110,7 +113,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     label: const Text('Edit'),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                     ),
                   ),
                 ],
@@ -128,14 +133,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text('Baby Information',
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineSmall),
+                        child: Text(
+                          'Baby Information',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
                       ),
                       TextButton.icon(
-                        onPressed: () =>
-                            Navigator.pushNamed(context, '/setup'),
+                        onPressed: () async {
+                          await Navigator.pushNamed(context, '/setup');
+                          await _loadProfile();
+                        },
                         icon: const Icon(Icons.edit, size: 16),
                         label: const Text('Edit'),
                       ),
@@ -143,11 +150,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 8),
                   _infoTile(
-                      Icons.baby_changing_station, 'Name', _profile.babyName),
-                  _infoTile(Icons.cake, 'Age',
-                      '${_profile.ageMonths} months old'),
+                    Icons.baby_changing_station,
+                    'Name',
+                    _profile.babyName,
+                  ),
                   _infoTile(
-                      Icons.scale, 'Weight', '${_profile.weight} kg'),
+                    Icons.cake,
+                    'Age',
+                    '${_profile.ageMonths} months old',
+                  ),
+                  _infoTile(Icons.scale, 'Weight', '${_profile.weight} kg'),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(
@@ -185,32 +197,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Notifications',
-                      style: Theme.of(context).textTheme.headlineSmall),
+                  Text(
+                    'Notifications',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
                   const SizedBox(height: 8),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    secondary: const Icon(Icons.notifications,
-                        color: AppTheme.primaryMain),
+                    secondary: const Icon(
+                      Icons.notifications,
+                      color: AppTheme.primaryMain,
+                    ),
                     title: const Text('Push Notifications'),
-                    subtitle:
-                        const Text('Receive alerts for health updates'),
+                    subtitle: const Text('Receive alerts for health updates'),
                     value: _notifications,
-                    onChanged: (v) =>
-                        setState(() => _notifications = v),
+                    onChanged: (v) => setState(() => _notifications = v),
                   ),
                   const Divider(),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    secondary: const Icon(Icons.warning,
-                        color: AppTheme.errorMain),
+                    secondary: const Icon(
+                      Icons.warning,
+                      color: AppTheme.errorMain,
+                    ),
                     title: const Text('Critical Alerts'),
-                    subtitle:
-                        const Text('High-priority health warnings'),
+                    subtitle: const Text('High-priority health warnings'),
                     value: _criticalAlerts,
                     activeThumbColor: AppTheme.errorMain,
-                    onChanged: (v) =>
-                        setState(() => _criticalAlerts = v),
+                    onChanged: (v) => setState(() => _criticalAlerts = v),
                   ),
                 ],
               ),
@@ -225,15 +239,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Settings',
-                      style: Theme.of(context).textTheme.headlineSmall),
+                  Text(
+                    'Settings',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
                   const SizedBox(height: 8),
-                  _settingsTile(Icons.security, 'Privacy & Security',
-                      'Manage your data and privacy'),
                   _settingsTile(
-                      Icons.language, 'Language', 'English (US)'),
-                  _settingsTile(Icons.help, 'Help & Support',
-                      'FAQs and contact support'),
+                    Icons.security,
+                    'Privacy & Security',
+                    'Manage your data and privacy',
+                  ),
+                  _settingsTile(Icons.language, 'Language', 'English (US)'),
+                  _settingsTile(
+                    Icons.help,
+                    'Help & Support',
+                    'FAQs and contact support',
+                  ),
                 ],
               ),
             ),
@@ -248,21 +269,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('About PediaSense',
-                      style: Theme.of(context).textTheme.headlineSmall),
+                  Text(
+                    'About PediaSense',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
                   const SizedBox(height: 8),
-                  Text('Version 1.0.0',
-                      style: Theme.of(context).textTheme.bodySmall),
+                  Text(
+                    'Version 1.0.0',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                   const SizedBox(height: 4),
                   Text(
                     'PediaSense uses WHO IMCI (Integrated Management of Childhood Illness) guidelines to provide evidence-based health monitoring for toddlers aged 12-24 months.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 8),
-                  Text('© 2026 PediaSense. All rights reserved.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontSize: 11,
-                          )),
+                  Text(
+                    '© 2026 PediaSense. All rights reserved.',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(fontSize: 11),
+                  ),
                 ],
               ),
             ),
