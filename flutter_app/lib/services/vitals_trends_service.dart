@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -20,16 +21,16 @@ class SensorReading {
   });
 
   Map<String, dynamic> toJson() => {
-        'type': type,
-        'value': value,
-        'timestamp': timestamp.toIso8601String(),
-      };
+    'type': type,
+    'value': value,
+    'timestamp': timestamp.toIso8601String(),
+  };
 
   factory SensorReading.fromJson(Map<String, dynamic> j) => SensorReading(
-        type: j['type'] as String,
-        value: (j['value'] as num).toDouble(),
-        timestamp: DateTime.parse(j['timestamp'] as String),
-      );
+    type: j['type'] as String,
+    value: (j['value'] as num).toDouble(),
+    timestamp: DateTime.parse(j['timestamp'] as String),
+  );
 }
 
 /// An aggregated hourly vitals record.
@@ -57,48 +58,45 @@ class HourlyVitals {
   });
 
   Map<String, dynamic> toSupabaseJson() => {
-        'baby_id': babyId,
-        'hour_start': hourStart.toUtc().toIso8601String(),
-        'avg_hr': avgHr,
-        'min_hr': minHr,
-        'max_hr': maxHr,
-        'avg_br': avgBr,
-        'min_br': minBr,
-        'max_br': maxBr,
-        'event_flag': eventFlag,
-      };
+    'baby_id': babyId,
+    'hour_start': hourStart.toUtc().toIso8601String(),
+    'avg_hr': avgHr,
+    'min_hr': minHr,
+    'max_hr': maxHr,
+    'avg_br': avgBr,
+    'min_br': minBr,
+    'max_br': maxBr,
+    'event_flag': eventFlag,
+  };
 
-  Map<String, dynamic> toLocalJson() => {
-        ...toSupabaseJson(),
-        'synced': synced,
-      };
+  Map<String, dynamic> toLocalJson() => {...toSupabaseJson(), 'synced': synced};
 
   factory HourlyVitals.fromSupabase(Map<String, dynamic> j) => HourlyVitals(
-        id: j['id'] as String?,
-        babyId: j['baby_id'] as String? ?? 'default',
-        hourStart: DateTime.parse(j['hour_start'] as String).toLocal(),
-        avgHr: (j['avg_hr'] as num?)?.toDouble() ?? 0,
-        minHr: (j['min_hr'] as num?)?.toDouble() ?? 0,
-        maxHr: (j['max_hr'] as num?)?.toDouble() ?? 0,
-        avgBr: (j['avg_br'] as num?)?.toDouble() ?? 0,
-        minBr: (j['min_br'] as num?)?.toDouble() ?? 0,
-        maxBr: (j['max_br'] as num?)?.toDouble() ?? 0,
-        eventFlag: j['event_flag'] as bool? ?? false,
-        synced: true,
-      );
+    id: j['id'] as String?,
+    babyId: j['baby_id'] as String? ?? 'default',
+    hourStart: DateTime.parse(j['hour_start'] as String).toLocal(),
+    avgHr: (j['avg_hr'] as num?)?.toDouble() ?? 0,
+    minHr: (j['min_hr'] as num?)?.toDouble() ?? 0,
+    maxHr: (j['max_hr'] as num?)?.toDouble() ?? 0,
+    avgBr: (j['avg_br'] as num?)?.toDouble() ?? 0,
+    minBr: (j['min_br'] as num?)?.toDouble() ?? 0,
+    maxBr: (j['max_br'] as num?)?.toDouble() ?? 0,
+    eventFlag: j['event_flag'] as bool? ?? false,
+    synced: true,
+  );
 
   factory HourlyVitals.fromLocalJson(Map<String, dynamic> j) => HourlyVitals(
-        babyId: j['baby_id'] as String? ?? 'default',
-        hourStart: DateTime.parse(j['hour_start'] as String).toLocal(),
-        avgHr: (j['avg_hr'] as num?)?.toDouble() ?? 0,
-        minHr: (j['min_hr'] as num?)?.toDouble() ?? 0,
-        maxHr: (j['max_hr'] as num?)?.toDouble() ?? 0,
-        avgBr: (j['avg_br'] as num?)?.toDouble() ?? 0,
-        minBr: (j['min_br'] as num?)?.toDouble() ?? 0,
-        maxBr: (j['max_br'] as num?)?.toDouble() ?? 0,
-        eventFlag: j['event_flag'] as bool? ?? false,
-        synced: j['synced'] as bool? ?? false,
-      );
+    babyId: j['baby_id'] as String? ?? 'default',
+    hourStart: DateTime.parse(j['hour_start'] as String).toLocal(),
+    avgHr: (j['avg_hr'] as num?)?.toDouble() ?? 0,
+    minHr: (j['min_hr'] as num?)?.toDouble() ?? 0,
+    maxHr: (j['max_hr'] as num?)?.toDouble() ?? 0,
+    avgBr: (j['avg_br'] as num?)?.toDouble() ?? 0,
+    minBr: (j['min_br'] as num?)?.toDouble() ?? 0,
+    maxBr: (j['max_br'] as num?)?.toDouble() ?? 0,
+    eventFlag: j['event_flag'] as bool? ?? false,
+    synced: j['synced'] as bool? ?? false,
+  );
 }
 
 // ─── Vitals Trends Service (Singleton) ───────────────────────────────────────
@@ -107,8 +105,8 @@ class VitalsTrendsService {
   VitalsTrendsService._();
   static final VitalsTrendsService instance = VitalsTrendsService._();
 
-  static const _bufferKey = 'sensor_buffer';
-  static const _localVitalsKey = 'local_hourly_vitals';
+  static const _bufferKeyPrefix = 'sensor_buffer';
+  static const _localVitalsKeyPrefix = 'local_hourly_vitals';
   static const _table = 'hourly_vitals';
 
   SupabaseClient get _db => Supabase.instance.client;
@@ -118,31 +116,44 @@ class VitalsTrendsService {
   Timer? _syncTimer;
   final _rng = Random();
 
+  String _resolveBabyId(String? babyId) {
+    final resolved =
+        babyId ?? _db.auth.currentSession?.user.id ?? _db.auth.currentUser?.id;
+    if (resolved == null || resolved.isEmpty) {
+      throw StateError('No authenticated user. Unable to resolve baby_id.');
+    }
+    return resolved;
+  }
+
+  String _bufferKey(String babyId) => '${_bufferKeyPrefix}_$babyId';
+  String _localVitalsKey(String babyId) => '${_localVitalsKeyPrefix}_$babyId';
+
   // ═══════════════════════════════════════════════════════════════════════════
   //  1. LOCAL SENSOR BUFFER (SharedPreferences)
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Add a raw sensor reading to the local buffer.
-  Future<void> bufferReading(SensorReading reading) async {
+  Future<void> bufferReading(SensorReading reading, {String? babyId}) async {
+    final resolvedBabyId = _resolveBabyId(babyId);
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_bufferKey) ?? [];
+    final raw = prefs.getStringList(_bufferKey(resolvedBabyId)) ?? [];
     raw.add(jsonEncode(reading.toJson()));
-    await prefs.setStringList(_bufferKey, raw);
+    await prefs.setStringList(_bufferKey(resolvedBabyId), raw);
   }
 
   /// Get all buffered readings.
-  Future<List<SensorReading>> getBufferedReadings() async {
+  Future<List<SensorReading>> getBufferedReadings({String? babyId}) async {
+    final resolvedBabyId = _resolveBabyId(babyId);
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_bufferKey) ?? [];
-    return raw
-        .map((s) => SensorReading.fromJson(jsonDecode(s)))
-        .toList();
+    final raw = prefs.getStringList(_bufferKey(resolvedBabyId)) ?? [];
+    return raw.map((s) => SensorReading.fromJson(jsonDecode(s))).toList();
   }
 
   /// Clear the sensor buffer after aggregation.
-  Future<void> clearBuffer() async {
+  Future<void> clearBuffer({String? babyId}) async {
+    final resolvedBabyId = _resolveBabyId(babyId);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_bufferKey);
+    await prefs.remove(_bufferKey(resolvedBabyId));
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -150,13 +161,15 @@ class VitalsTrendsService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Aggregate buffered readings into an hourly record.
-  Future<HourlyVitals?> aggregate() async {
-    final readings = await getBufferedReadings();
+  Future<HourlyVitals?> aggregate({String? babyId}) async {
+    final resolvedBabyId = _resolveBabyId(babyId);
+    final readings = await getBufferedReadings(babyId: resolvedBabyId);
     if (readings.isEmpty) return null;
 
     final hrReadings = readings.where((r) => r.type == 'heart_rate').toList();
-    final brReadings =
-        readings.where((r) => r.type == 'breathing_rate').toList();
+    final brReadings = readings
+        .where((r) => r.type == 'breathing_rate')
+        .toList();
 
     if (hrReadings.isEmpty && brReadings.isEmpty) return null;
 
@@ -186,6 +199,7 @@ class VitalsTrendsService {
     final hourStart = DateTime(now.year, now.month, now.day, now.hour);
 
     final vitals = HourlyVitals(
+      babyId: resolvedBabyId,
       hourStart: hourStart,
       avgHr: double.parse(avgHr.toStringAsFixed(1)),
       minHr: double.parse(minHr.toStringAsFixed(1)),
@@ -201,10 +215,10 @@ class VitalsTrendsService {
     await _storeLocalVitals(vitals);
 
     // Clear buffer after successful aggregation
-    await clearBuffer();
+    await clearBuffer(babyId: resolvedBabyId);
 
     // Try to sync immediately
-    await syncUnsynced();
+    await syncUnsynced(babyId: resolvedBabyId);
 
     return vitals;
   }
@@ -215,7 +229,8 @@ class VitalsTrendsService {
 
   Future<void> _storeLocalVitals(HourlyVitals vitals) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_localVitalsKey) ?? [];
+    final key = _localVitalsKey(vitals.babyId);
+    final raw = prefs.getStringList(key) ?? [];
 
     // Check for duplicate (same hour_start)
     final hourStr = vitals.hourStart.toUtc().toIso8601String();
@@ -225,15 +240,14 @@ class VitalsTrendsService {
     });
 
     raw.add(jsonEncode(vitals.toLocalJson()));
-    await prefs.setStringList(_localVitalsKey, raw);
+    await prefs.setStringList(key, raw);
   }
 
-  Future<List<HourlyVitals>> getLocalVitals() async {
+  Future<List<HourlyVitals>> getLocalVitals({String? babyId}) async {
+    final resolvedBabyId = _resolveBabyId(babyId);
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_localVitalsKey) ?? [];
-    return raw
-        .map((s) => HourlyVitals.fromLocalJson(jsonDecode(s)))
-        .toList()
+    final raw = prefs.getStringList(_localVitalsKey(resolvedBabyId)) ?? [];
+    return raw.map((s) => HourlyVitals.fromLocalJson(jsonDecode(s))).toList()
       ..sort((a, b) => b.hourStart.compareTo(a.hourStart));
   }
 
@@ -242,9 +256,11 @@ class VitalsTrendsService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Push all unsynced local records to Supabase.
-  Future<void> syncUnsynced() async {
+  Future<void> syncUnsynced({String? babyId}) async {
+    final resolvedBabyId = _resolveBabyId(babyId);
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_localVitalsKey) ?? [];
+    final key = _localVitalsKey(resolvedBabyId);
+    final raw = prefs.getStringList(key) ?? [];
     bool changed = false;
 
     final updated = <String>[];
@@ -258,21 +274,24 @@ class VitalsTrendsService {
       try {
         final vitals = HourlyVitals.fromLocalJson(j);
         // Upsert to prevent duplicates (unique index on baby_id + hour_start)
-        await _db.from(_table).upsert(
-          vitals.toSupabaseJson(),
-          onConflict: 'baby_id,hour_start',
-        );
+        await _db
+            .from(_table)
+            .upsert(vitals.toSupabaseJson(), onConflict: 'baby_id,hour_start')
+            .timeout(const Duration(seconds: 5));
         j['synced'] = true;
         updated.add(jsonEncode(j));
         changed = true;
-      } catch (_) {
+      } catch (e) {
+        debugPrint(
+          'Vitals sync failed for baby_id=${j['baby_id']} hour_start=${j['hour_start']}: $e',
+        );
         // Keep as unsynced, will retry later
         updated.add(s);
       }
     }
 
     if (changed) {
-      await prefs.setStringList(_localVitalsKey, updated);
+      await prefs.setStringList(key, updated);
     }
   }
 
@@ -283,15 +302,17 @@ class VitalsTrendsService {
   /// Fetch hourly vitals for the last N hours.
   Future<List<HourlyVitals>> fetchHourly({
     int hours = 24,
-    String babyId = 'default',
+    String? babyId,
   }) async {
+    final resolvedBabyId = _resolveBabyId(babyId);
     final from = DateTime.now().subtract(Duration(hours: hours));
     final response = await _db
         .from(_table)
         .select()
-        .eq('baby_id', babyId)
+        .eq('baby_id', resolvedBabyId)
         .gte('hour_start', from.toUtc().toIso8601String())
-        .order('hour_start', ascending: true);
+        .order('hour_start', ascending: true)
+        .timeout(const Duration(seconds: 6));
 
     return (response as List)
         .map((r) => HourlyVitals.fromSupabase(r as Map<String, dynamic>))
@@ -299,17 +320,16 @@ class VitalsTrendsService {
   }
 
   /// Fetch hourly vitals for the last N days.
-  Future<List<HourlyVitals>> fetchDays({
-    int days = 7,
-    String babyId = 'default',
-  }) async {
+  Future<List<HourlyVitals>> fetchDays({int days = 7, String? babyId}) async {
+    final resolvedBabyId = _resolveBabyId(babyId);
     final from = DateTime.now().subtract(Duration(days: days));
     final response = await _db
         .from(_table)
         .select()
-        .eq('baby_id', babyId)
+        .eq('baby_id', resolvedBabyId)
         .gte('hour_start', from.toUtc().toIso8601String())
-        .order('hour_start', ascending: true);
+        .order('hour_start', ascending: true)
+        .timeout(const Duration(seconds: 6));
 
     return (response as List)
         .map((r) => HourlyVitals.fromSupabase(r as Map<String, dynamic>))
@@ -342,8 +362,7 @@ class VitalsTrendsService {
       });
     }
 
-    result.sort(
-        (a, b) => (a['date'] as String).compareTo(b['date'] as String));
+    result.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
     return result;
   }
 
@@ -437,21 +456,23 @@ class VitalsTrendsService {
 
   /// Start simulating sensor readings every 5 seconds.
   void startSimulation() {
+    final resolvedBabyId = _resolveBabyId(null);
+
     _simulationTimer?.cancel();
     _simulationTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      _simulateSensorData();
+      _simulateSensorData(resolvedBabyId);
     });
 
     // Auto-aggregate every 60 seconds for testing (instead of 1 hour)
     _aggregationTimer?.cancel();
     _aggregationTimer = Timer.periodic(const Duration(seconds: 60), (_) {
-      aggregate();
+      aggregate(babyId: resolvedBabyId);
     });
 
     // Auto-sync every 30 seconds
     _syncTimer?.cancel();
     _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      syncUnsynced();
+      syncUnsynced(babyId: resolvedBabyId);
     });
   }
 
@@ -461,21 +482,27 @@ class VitalsTrendsService {
     _syncTimer?.cancel();
   }
 
-  void _simulateSensorData() {
+  void _simulateSensorData(String babyId) {
     // Simulate realistic neonatal vitals
     final hr = 110.0 + _rng.nextDouble() * 20 - 5; // 105-125 bpm
     final br = 28.0 + _rng.nextDouble() * 8 - 2; // 26-34 breaths/min
 
-    bufferReading(SensorReading(
-      type: 'heart_rate',
-      value: double.parse(hr.toStringAsFixed(1)),
-      timestamp: DateTime.now(),
-    ));
-    bufferReading(SensorReading(
-      type: 'breathing_rate',
-      value: double.parse(br.toStringAsFixed(1)),
-      timestamp: DateTime.now(),
-    ));
+    bufferReading(
+      SensorReading(
+        type: 'heart_rate',
+        value: double.parse(hr.toStringAsFixed(1)),
+        timestamp: DateTime.now(),
+      ),
+      babyId: babyId,
+    );
+    bufferReading(
+      SensorReading(
+        type: 'breathing_rate',
+        value: double.parse(br.toStringAsFixed(1)),
+        timestamp: DateTime.now(),
+      ),
+      babyId: babyId,
+    );
   }
 
   /// Manually trigger aggregation (for testing).

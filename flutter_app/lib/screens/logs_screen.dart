@@ -63,7 +63,7 @@ class _LogsScreenState extends State<LogsScreen>
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _error = 'Failed to load logs. Pull to retry.';
+        _error = 'Failed to load logs: $e';
       });
     }
   }
@@ -72,7 +72,9 @@ class _LogsScreenState extends State<LogsScreen>
 
   List<LogEntry> get _filteredLogs {
     final types = [LogType.diaper, LogType.feeding, LogType.symptom];
-    return _logs.where((log) => log.type == types[_tabController.index]).toList();
+    return _logs
+        .where((log) => log.type == types[_tabController.index])
+        .toList();
   }
 
   // ── Add log to Supabase ─────────────────────────────────────────────────
@@ -115,8 +117,8 @@ class _LogsScreenState extends State<LogsScreen>
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to save log. Please try again.'),
+        SnackBar(
+          content: Text('Failed to save log: $e'),
           backgroundColor: AppTheme.errorMain,
         ),
       );
@@ -181,140 +183,170 @@ class _LogsScreenState extends State<LogsScreen>
     showDialog(
       context: context,
       builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, setDialogState) {
-          final tabIndex = _tabController.index;
-          final titles = ['Add Diaper Change', 'Add Feeding', 'Add Symptom'];
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            final tabIndex = _tabController.index;
+            final titles = ['Add Diaper Change', 'Add Feeding', 'Add Symptom'];
 
-          return AlertDialog(
-            title: Text(titles[tabIndex]),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (tabIndex == 0) ...[
-                    DropdownButtonFormField<String>(
-                      initialValue: _diaperWetness,
-                      decoration:
-                          const InputDecoration(labelText: 'Wetness'),
-                      items: const [
-                        DropdownMenuItem(value: 'wet', child: Text('Wet')),
-                        DropdownMenuItem(value: 'dry', child: Text('Dry')),
-                        DropdownMenuItem(
-                            value: 'very-wet', child: Text('Very Wet')),
-                      ],
-                      onChanged: (v) =>
-                          setDialogState(() => _diaperWetness = v!),
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      initialValue: _diaperStool,
-                      decoration: const InputDecoration(labelText: 'Stool'),
-                      items: const [
-                        DropdownMenuItem(value: 'none', child: Text('None')),
-                        DropdownMenuItem(
-                            value: 'normal', child: Text('Normal')),
-                        DropdownMenuItem(
-                            value: 'loose', child: Text('Loose')),
-                        DropdownMenuItem(value: 'hard', child: Text('Hard')),
-                        DropdownMenuItem(
+            return AlertDialog(
+              title: Text(titles[tabIndex]),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (tabIndex == 0) ...[
+                      DropdownButtonFormField<String>(
+                        initialValue: _diaperWetness,
+                        decoration: const InputDecoration(labelText: 'Wetness'),
+                        items: const [
+                          DropdownMenuItem(value: 'wet', child: Text('Wet')),
+                          DropdownMenuItem(value: 'dry', child: Text('Dry')),
+                          DropdownMenuItem(
+                            value: 'very-wet',
+                            child: Text('Very Wet'),
+                          ),
+                        ],
+                        onChanged: (v) =>
+                            setDialogState(() => _diaperWetness = v!),
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        initialValue: _diaperStool,
+                        decoration: const InputDecoration(labelText: 'Stool'),
+                        items: const [
+                          DropdownMenuItem(value: 'none', child: Text('None')),
+                          DropdownMenuItem(
+                            value: 'normal',
+                            child: Text('Normal'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'loose',
+                            child: Text('Loose'),
+                          ),
+                          DropdownMenuItem(value: 'hard', child: Text('Hard')),
+                          DropdownMenuItem(
                             value: 'watery',
-                            child: Text('Watery (Diarrhea)')),
-                      ],
-                      onChanged: (v) =>
-                          setDialogState(() => _diaperStool = v!),
-                    ),
-                  ] else if (tabIndex == 1) ...[
-                    DropdownButtonFormField<String>(
-                      initialValue: _feedingType,
-                      decoration:
-                          const InputDecoration(labelText: 'Feeding Type'),
-                      items: const [
-                        DropdownMenuItem(
-                            value: 'breast', child: Text('Breast Milk')),
-                        DropdownMenuItem(
-                            value: 'formula', child: Text('Formula')),
-                        DropdownMenuItem(
-                            value: 'mixed', child: Text('Mixed')),
-                      ],
-                      onChanged: (v) =>
-                          setDialogState(() => _feedingType = v!),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _feedingDurationController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Duration (minutes)',
+                            child: Text('Watery (Diarrhea)'),
+                          ),
+                        ],
+                        onChanged: (v) =>
+                            setDialogState(() => _diaperStool = v!),
                       ),
-                    ),
-                  ] else ...[
-                    DropdownButtonFormField<String>(
-                      initialValue: _symptomType,
-                      decoration:
-                          const InputDecoration(labelText: 'Symptom Type'),
-                      items: const [
-                        DropdownMenuItem(
-                            value: 'diarrhea', child: Text('Diarrhea')),
-                        DropdownMenuItem(
-                            value: 'vomiting', child: Text('Vomiting')),
-                        DropdownMenuItem(
-                            value: 'cough', child: Text('Cough')),
-                        DropdownMenuItem(value: 'rash', child: Text('Rash')),
-                        DropdownMenuItem(
-                            value: 'fever', child: Text('Fever')),
-                        DropdownMenuItem(
+                    ] else if (tabIndex == 1) ...[
+                      DropdownButtonFormField<String>(
+                        initialValue: _feedingType,
+                        decoration: const InputDecoration(
+                          labelText: 'Feeding Type',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'breast',
+                            child: Text('Breast Milk'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'formula',
+                            child: Text('Formula'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'mixed',
+                            child: Text('Mixed'),
+                          ),
+                        ],
+                        onChanged: (v) =>
+                            setDialogState(() => _feedingType = v!),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _feedingDurationController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Duration (minutes)',
+                        ),
+                      ),
+                    ] else ...[
+                      DropdownButtonFormField<String>(
+                        initialValue: _symptomType,
+                        decoration: const InputDecoration(
+                          labelText: 'Symptom Type',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'diarrhea',
+                            child: Text('Diarrhea'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'vomiting',
+                            child: Text('Vomiting'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'cough',
+                            child: Text('Cough'),
+                          ),
+                          DropdownMenuItem(value: 'rash', child: Text('Rash')),
+                          DropdownMenuItem(
+                            value: 'fever',
+                            child: Text('Fever'),
+                          ),
+                          DropdownMenuItem(
                             value: 'congestion',
-                            child: Text('Congestion')),
-                      ],
-                      onChanged: (v) =>
-                          setDialogState(() => _symptomType = v!),
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      initialValue: _symptomSeverity,
-                      decoration:
-                          const InputDecoration(labelText: 'Severity'),
-                      items: const [
-                        DropdownMenuItem(value: 'mild', child: Text('Mild')),
-                        DropdownMenuItem(
-                            value: 'moderate', child: Text('Moderate')),
-                        DropdownMenuItem(
-                            value: 'severe', child: Text('Severe')),
-                      ],
-                      onChanged: (v) =>
-                          setDialogState(() => _symptomSeverity = v!),
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _symptomNotesController,
-                      maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Notes',
-                        hintText: 'Additional observations...',
+                            child: Text('Congestion'),
+                          ),
+                        ],
+                        onChanged: (v) =>
+                            setDialogState(() => _symptomType = v!),
                       ),
-                    ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        initialValue: _symptomSeverity,
+                        decoration: const InputDecoration(
+                          labelText: 'Severity',
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'mild', child: Text('Mild')),
+                          DropdownMenuItem(
+                            value: 'moderate',
+                            child: Text('Moderate'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'severe',
+                            child: Text('Severe'),
+                          ),
+                        ],
+                        onChanged: (v) =>
+                            setDialogState(() => _symptomSeverity = v!),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _symptomNotesController,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'Notes',
+                          hintText: 'Additional observations...',
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  _addLog();
-                  Navigator.pop(ctx);
-                },
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(100, 40),
                 ),
-                child: const Text('Add Entry'),
               ),
-            ],
-          );
-        });
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    _addLog();
+                    Navigator.pop(ctx);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(100, 40),
+                  ),
+                  child: const Text('Add Entry'),
+                ),
+              ],
+            );
+          },
+        );
       },
     );
   }
@@ -381,55 +413,55 @@ class _LogsScreenState extends State<LogsScreen>
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : _error != null
-                  ? _buildErrorState()
-                  : RefreshIndicator(
-                      onRefresh: _fetchLogs,
+              ? _buildErrorState()
+              : RefreshIndicator(
+                  onRefresh: _fetchLogs,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Card(
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
                               children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        "Today's Entries",
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .headlineSmall,
-                                      ),
-                                    ),
-                                    Text(
-                                      '${_filteredLogs.length}',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppTheme.primaryMain,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
                                 Expanded(
-                                  child: _filteredLogs.isEmpty
-                                      ? _buildEmptyState()
-                                      : ListView.builder(
-                                          itemCount: _filteredLogs.length,
-                                          itemBuilder: (context, index) {
-                                            final log = _filteredLogs[index];
-                                            return _buildLogTile(log);
-                                          },
-                                        ),
+                                  child: Text(
+                                    "Today's Entries",
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.headlineSmall,
+                                  ),
+                                ),
+                                Text(
+                                  '${_filteredLogs.length}',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTheme.primaryMain,
+                                  ),
                                 ),
                               ],
                             ),
-                          ),
+                            const SizedBox(height: 12),
+                            Expanded(
+                              child: _filteredLogs.isEmpty
+                                  ? _buildEmptyState()
+                                  : ListView.builder(
+                                      itemCount: _filteredLogs.length,
+                                      itemBuilder: (context, index) {
+                                        final log = _filteredLogs[index];
+                                        return _buildLogTile(log);
+                                      },
+                                    ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
+                  ),
+                ),
         ),
         const SizedBox(height: 80),
       ],
@@ -464,7 +496,11 @@ class _LogsScreenState extends State<LogsScreen>
           style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
         ),
         trailing: IconButton(
-          icon: Icon(Icons.delete_outline, color: Colors.grey.shade400, size: 20),
+          icon: Icon(
+            Icons.delete_outline,
+            color: Colors.grey.shade400,
+            size: 20,
+          ),
           onPressed: () => _deleteLog(log.id),
         ),
       ),

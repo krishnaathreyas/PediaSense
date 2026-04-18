@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'theme/app_theme.dart';
-import 'models/baby_profile.dart';
 import 'screens/login_screen.dart';
 import 'screens/caregiver_setup_screen.dart';
 import 'screens/device_connection_screen.dart';
@@ -75,16 +75,21 @@ class _SplashGateState extends State<SplashGate> {
       return;
     }
 
-    // 2. Logged in — check if baby profile exists for this user
-    final hasProfile = await BabyProfile.existsForCurrentUser();
+    // 2. Logged in — fast local-first check during startup
+    // This avoids hanging on Supabase query during critical startup phase
+    final userId = session.user.id;
+    final localCacheKey = 'babyProfile_$userId';
+    final prefs = await SharedPreferences.getInstance();
+    final cachedProfile = prefs.getString(localCacheKey);
 
     if (!mounted) return;
 
-    if (hasProfile) {
-      // Profile exists → dashboard
+    if (cachedProfile != null) {
+      // Profile cached locally → go to dashboard
       Navigator.pushReplacementNamed(context, '/home');
     } else {
-      // Logged in but no profile → setup
+      // No local cache → go to setup
+      // Setup screen will do full Supabase check to determine if truly needs form or should bypass
       Navigator.pushReplacementNamed(context, '/setup');
     }
   }

@@ -17,6 +17,12 @@ class RagService {
   RagService._();
   static final RagService instance = RagService._();
 
+  void _log(String stage, [Map<String, Object?> details = const {}]) {
+    final ts = DateTime.now().toIso8601String();
+    // ignore: avoid_print
+    print('[RAG][client][$ts] $stage ${details.isEmpty ? '' : details}');
+  }
+
   final _suggestionController = StreamController<RagSuggestion>.broadcast();
 
   /// Stream of RAG suggestions. Subscribe from the guidance screen.
@@ -46,16 +52,32 @@ class RagService {
   bool _isLBW = false;
 
   /// Call this whenever vitals update. It will decide whether to fetch.
-  void onVitalsUpdate(VitalsData vitals,
-      {int babyAgeMonths = 12, bool isLBW = false}) {
+  void onVitalsUpdate(
+    VitalsData vitals, {
+    int babyAgeMonths = 12,
+    bool isLBW = false,
+  }) {
     _currentVitals = vitals;
     _babyAgeMonths = babyAgeMonths;
     _isLBW = isLBW;
 
     final riskLevel = vitals.riskLevelString;
 
+    _log('onVitalsUpdate.received', {
+      'risk': riskLevel,
+      'hr': vitals.heartRate,
+      'spo2': vitals.spo2,
+      'br': vitals.breathingRate,
+      'temp': vitals.skinTemp,
+      'ageMonths': babyAgeMonths,
+      'isLBW': isLBW,
+    });
+
     // Only fetch on AMBER or RED
     if (riskLevel == 'normal') {
+      _log('onVitalsUpdate.skip_normal', {
+        'lastFetchedRisk': _lastFetchedRiskLevel,
+      });
       if (_lastFetchedRiskLevel != 'normal') {
         _lastFetchedRiskLevel = 'normal';
         _lastSuggestion = null;
@@ -65,12 +87,21 @@ class RagService {
 
     // Don't re-fetch if we already have a suggestion for this risk level
     if (riskLevel == _lastFetchedRiskLevel && _lastSuggestion != null) {
+      _log('onVitalsUpdate.skip_cached', {
+        'risk': riskLevel,
+        'isFromRAG': _lastSuggestion?.isFromRAG,
+      });
       return;
     }
 
     // Debounce
     _debounceTimer?.cancel();
+    _log('onVitalsUpdate.debounce_scheduled', {
+      'delayMs': _debounceDuration.inMilliseconds,
+      'risk': riskLevel,
+    });
     _debounceTimer = Timer(_debounceDuration, () {
+      _log('onVitalsUpdate.debounce_fire', {'risk': riskLevel});
       _fetchSuggestion(vitals, babyAgeMonths: babyAgeMonths, isLBW: isLBW);
     });
   }
@@ -79,6 +110,12 @@ class RagService {
   /// Returns the parsed RagSuggestion (also emitted on the stream).
   Future<RagSuggestion> askQuestion(String question) async {
     _isFetching = true;
+    final startedAt = DateTime.now();
+
+    _log('askQuestion.start', {
+      'questionLength': question.length,
+      'hasVitalsContext': _currentVitals != null,
+    });
 
     try {
       final payload = <String, dynamic>{
@@ -96,9 +133,15 @@ class RagService {
         payload['riskLevel'] = _currentVitals!.riskLevelString;
       }
 
+      _log('askQuestion.invoke', {'payloadKeys': payload.keys.join(',')});
+
       final response = await Supabase.instance.client.functions
           .invoke('rag-suggest', body: payload)
           .timeout(const Duration(seconds: 20));
+
+      _log('askQuestion.response_raw', {
+        'dataType': response.data.runtimeType.toString(),
+      });
 
       final data = response.data;
       Map<String, dynamic> json;
@@ -110,14 +153,32 @@ class RagService {
         throw Exception('Unexpected response type: ${data.runtimeType}');
       }
 
+      if (json['error'] != null) {
+        _log('askQuestion.server_fallback', {
+          'error': json['error'].toString(),
+          'requestId': json['requestId']?.toString(),
+        });
+      }
+
       final suggestion = RagSuggestion.fromJson(json);
       _lastSuggestion = suggestion;
+      _log('askQuestion.success', {
+        'isFromRAG': suggestion.isFromRAG,
+        'severity': suggestion.severity,
+        'chunksUsed': suggestion.chunksUsed,
+        'durationMs': DateTime.now().difference(startedAt).inMilliseconds,
+      });
       // Don't emit on stream — chat screen handles user query responses
       // directly via the returned Future, not via the auto-suggestion stream.
       return suggestion;
     } catch (e) {
+      _log('askQuestion.exception', {
+        'error': e.toString(),
+        'durationMs': DateTime.now().difference(startedAt).inMilliseconds,
+      });
       final fallback = RagSuggestion.localFallback(
-          _currentVitals?.riskLevelString ?? 'monitor');
+        _currentVitals?.riskLevelString ?? 'monitor',
+      );
       _lastSuggestion = fallback;
       return fallback;
     } finally {
@@ -130,10 +191,23 @@ class RagService {
     int babyAgeMonths = 12,
     bool isLBW = false,
   }) async {
-    if (_isFetching) return;
+    if (_isFetching) {
+      _log('_fetchSuggestion.skip_inflight');
+      return;
+    }
     _isFetching = true;
+    final startedAt = DateTime.now();
 
     final riskLevel = vitals.riskLevelString;
+    _log('_fetchSuggestion.start', {
+      'risk': riskLevel,
+      'hr': vitals.heartRate,
+      'spo2': vitals.spo2,
+      'br': vitals.breathingRate,
+      'temp': vitals.skinTemp,
+      'ageMonths': babyAgeMonths,
+      'isLBW': isLBW,
+    });
 
     try {
       final payload = {
@@ -146,9 +220,15 @@ class RagService {
         'isLBW': isLBW,
       };
 
+      _log('_fetchSuggestion.invoke', {'payloadKeys': payload.keys.join(',')});
+
       final response = await Supabase.instance.client.functions
           .invoke('rag-suggest', body: payload)
           .timeout(const Duration(seconds: 15));
+
+      _log('_fetchSuggestion.response_raw', {
+        'dataType': response.data.runtimeType.toString(),
+      });
 
       final data = response.data;
 
@@ -161,12 +241,29 @@ class RagService {
         throw Exception('Unexpected response type: ${data.runtimeType}');
       }
 
+      if (json['error'] != null) {
+        _log('_fetchSuggestion.server_fallback', {
+          'error': json['error'].toString(),
+          'requestId': json['requestId']?.toString(),
+        });
+      }
+
       final suggestion = RagSuggestion.fromJson(json);
 
       _lastSuggestion = suggestion;
       _lastFetchedRiskLevel = riskLevel;
       _suggestionController.add(suggestion);
+      _log('_fetchSuggestion.success', {
+        'isFromRAG': suggestion.isFromRAG,
+        'severity': suggestion.severity,
+        'chunksUsed': suggestion.chunksUsed,
+        'durationMs': DateTime.now().difference(startedAt).inMilliseconds,
+      });
     } catch (e) {
+      _log('_fetchSuggestion.exception', {
+        'error': e.toString(),
+        'durationMs': DateTime.now().difference(startedAt).inMilliseconds,
+      });
       final fallback = RagSuggestion.localFallback(riskLevel);
       _lastSuggestion = fallback;
       _lastFetchedRiskLevel = riskLevel;
@@ -177,12 +274,19 @@ class RagService {
   }
 
   /// Force a fresh fetch regardless of cache.
-  Future<void> refresh(VitalsData vitals,
-      {int babyAgeMonths = 12, bool isLBW = false}) async {
+  Future<void> refresh(
+    VitalsData vitals, {
+    int babyAgeMonths = 12,
+    bool isLBW = false,
+  }) async {
+    _log('refresh.start', {
+      'risk': vitals.riskLevelString,
+      'ageMonths': babyAgeMonths,
+      'isLBW': isLBW,
+    });
     _lastFetchedRiskLevel = null;
     _debounceTimer?.cancel();
-    await _fetchSuggestion(vitals,
-        babyAgeMonths: babyAgeMonths, isLBW: isLBW);
+    await _fetchSuggestion(vitals, babyAgeMonths: babyAgeMonths, isLBW: isLBW);
   }
 
   void dispose() {

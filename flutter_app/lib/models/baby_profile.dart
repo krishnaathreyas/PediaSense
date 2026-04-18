@@ -52,14 +52,21 @@ class BabyProfile {
       throw Exception('No authenticated user found. Please sign in again.');
     }
 
-    await _db.from('baby_profiles').upsert({
-      'user_id': userId,
-      'baby_name': profile.babyName,
-      'age_months': profile.ageMonths,
-      'weight_kg': profile.weight,
-      'is_low_birth_weight': profile.isLowBirthWeight,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    });
+    try {
+      await _db
+          .from('baby_profiles')
+          .upsert({
+            'user_id': userId,
+            'baby_name': profile.babyName,
+            'age_months': profile.ageMonths,
+            'weight_kg': profile.weight,
+            'is_low_birth_weight': profile.isLowBirthWeight,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // Fail silently on timeout/network error; local cache is already updated below.
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_cacheKey(userId), jsonEncode(profile.toJson()));
@@ -78,7 +85,8 @@ class BabyProfile {
           .from('baby_profiles')
           .select('baby_name, age_months, weight_kg, is_low_birth_weight')
           .eq('user_id', userId)
-          .maybeSingle();
+          .maybeSingle()
+          .timeout(const Duration(seconds: 5));
 
       if (row != null) {
         final profile = BabyProfile(
@@ -92,7 +100,7 @@ class BabyProfile {
         return profile;
       }
     } catch (_) {
-      // Fall through to local cache on network/server failures.
+      // Fall through to local cache on network/server failures or timeout.
     }
 
     final data = prefs.getString(_cacheKey(userId));
@@ -114,10 +122,11 @@ class BabyProfile {
           .from('baby_profiles')
           .select('user_id')
           .eq('user_id', userId)
-          .maybeSingle();
+          .maybeSingle()
+          .timeout(const Duration(seconds: 5));
       if (row != null) return true;
     } catch (_) {
-      // Fall back to local cache if backend call fails.
+      // Fall back to local cache if backend call fails or times out.
     }
 
     return prefs.getString(_cacheKey(userId)) != null;

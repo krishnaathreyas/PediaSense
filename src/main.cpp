@@ -43,7 +43,7 @@ static const float BIRTH_WEIGHT_KG = 3.2f; // <-- set per patient
 static const int LOOP_PERIOD_MS =
     20; // ~50 Hz main loop (drains PPG FIFO in time)
 static const bool ENABLE_TEMP_SENSOR = true;
-static const bool ENABLE_MIC_SENSOR = false;
+static const bool ENABLE_MIC_SENSOR = true;
 static const bool ENABLE_ADVANCED_PROCESSING = false;
 
 // ── Serial debug helpers
@@ -53,28 +53,14 @@ static void print_status() {
   const ImuData &imu = imu_get();
   const TempData &tmp = temp_get();
   const MicData &mic = mic_get();
-  const BreathData &br = breathing_get();
-  const ApneaData &ap = apnea_get();
-  const CryData &cry = cry_get();
-  const ClassifierData &cl = classifier_get();
 
-  static const char *lvl_str[] = {"NORMAL", "AMBER", "RED"};
-  Serial.printf("──────────────────────────────────────────────────\n");
-  Serial.printf("PPG  : IR=%ld  HR=%d bpm  SpO2=%d%%  finger=%d\n", ppg.ir_raw,
-                ppg.hr, ppg.spo2, ppg.finger_on);
-  Serial.printf("IMU  : mag=%.3f m/s²  delta=%.3f\n", imu.accel_mag,
-                imu.motion_delta);
-  Serial.printf("Temp : skin=%.1f°C  amb=%.1f°C\n", tmp.skin_c, tmp.amb_c);
-  Serial.printf("Mic  : rms=%.0f  active=%d\n", mic.rms, mic.active);
-  Serial.printf("Breath: %.1f bpm  regular=%d  reg=%.2f  valid=%d\n",
-                br.rate_bpm, br.regular, br.regularity, br.valid);
-  Serial.printf("Apnea : now=%d  pause=%lums  1h=%d\n", ap.apnea_now,
-                ap.pause_ms, ap.event_count_1h);
-  Serial.printf("Cry  : %d  str=%d  /5min=%d  persist=%d\n", cry.crying,
-                cry.strength, cry.cries_per_5min, cry.persistent);
-  Serial.printf("RISK : %s  resp=%d  hydr=%d  flags=0x%02X  ble=%d\n",
-                lvl_str[cl.level], cl.respiratory_score, cl.hydration_score,
-                cl.flags, (int)ble_server_connected());
+  // Real-only output: no fallback/synthetic values.
+  const float shown_temp = tmp.valid ? tmp.skin_c : -999.0f;
+  Serial.printf(
+      "HR=%d bpm | SpO2=%d%% | MIC_RMS=%.0f MIC_PEAK=%ld MIC_ACTIVE=%d | "
+      "GYRO=%.1f,%.1f,%.1f dps | TEMP=%.1fC\n",
+      ppg.hr, ppg.spo2, mic.rms, (long)mic.peak, mic.active ? 1 : 0, imu.gx,
+      imu.gy, imu.gz, shown_temp);
 }
 
 // ── Setup

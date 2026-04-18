@@ -30,8 +30,10 @@ class _TrendsScreenState extends State<TrendsScreen> {
   @override
   void initState() {
     super.initState();
-    // Start simulation so data gets generated
-    _trendsService.startSimulation();
+    // Start simulation so data gets generated (only when a user session is available).
+    try {
+      _trendsService.startSimulation();
+    } catch (_) {}
     _fetchData();
   }
 
@@ -49,14 +51,19 @@ class _TrendsScreenState extends State<TrendsScreen> {
     });
 
     try {
-      // Fetch vitals from Supabase based on time range
+      // Fetch vitals from Supabase based on time range.
+      // If network is flaky, fall back to local cache quickly.
       List<HourlyVitals> vitals;
-      if (_timeRange == '24h') {
-        vitals = await _trendsService.fetchHourly(hours: 24);
-      } else if (_timeRange == '7d') {
-        vitals = await _trendsService.fetchDays(days: 7);
-      } else {
-        vitals = await _trendsService.fetchDays(days: 30);
+      try {
+        if (_timeRange == '24h') {
+          vitals = await _trendsService.fetchHourly(hours: 24);
+        } else if (_timeRange == '7d') {
+          vitals = await _trendsService.fetchDays(days: 7);
+        } else {
+          vitals = await _trendsService.fetchDays(days: 30);
+        }
+      } catch (_) {
+        vitals = await _trendsService.getLocalVitals();
       }
 
       // If no remote data, try local
@@ -73,19 +80,26 @@ class _TrendsScreenState extends State<TrendsScreen> {
         todayLogs = await _careLogService.fetchTodayLogs();
       } catch (_) {}
 
-      final diaperCount =
-          todayLogs.where((l) => l.type == LogType.diaper).length;
-      final feedingCount =
-          todayLogs.where((l) => l.type == LogType.feeding).length;
+      final diaperCount = todayLogs
+          .where((l) => l.type == LogType.diaper)
+          .length;
+      final feedingCount = todayLogs
+          .where((l) => l.type == LogType.feeding)
+          .length;
 
       // Build hydration data from care_logs (last 7 days)
       List<Map<String, dynamic>> hydration = [];
       try {
-        final weekLogs = await _careLogService.fetchTodayLogs();
-        // Group today's logs
+        final now = DateTime.now();
+        final weekLogs = await _careLogService.fetchLogsByDateRange(
+          from: now.subtract(const Duration(days: 7)),
+          to: now,
+        );
+
+        // Group last 7 days logs as a single aggregate bucket for current UI.
         hydration = [
           {
-            'day': 'Today',
+            'day': 'Last 7d',
             'wet_diapers': weekLogs
                 .where((l) => l.type == LogType.diaper)
                 .length
@@ -94,7 +108,7 @@ class _TrendsScreenState extends State<TrendsScreen> {
                 .where((l) => l.type == LogType.feeding)
                 .length
                 .toDouble(),
-          }
+          },
         ];
       } catch (_) {}
 
@@ -117,7 +131,7 @@ class _TrendsScreenState extends State<TrendsScreen> {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _error = 'Failed to load trends. Pull down to retry.';
+        _error = 'Failed to load trends: $e';
       });
     }
   }
@@ -137,11 +151,15 @@ class _TrendsScreenState extends State<TrendsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header
-            Text('Health Trends',
-                style: Theme.of(context).textTheme.headlineLarge),
+            Text(
+              'Health Trends',
+              style: Theme.of(context).textTheme.headlineLarge,
+            ),
             const SizedBox(height: 8),
-            Text("Visualize your baby's health patterns over time",
-                style: Theme.of(context).textTheme.bodyMedium),
+            Text(
+              "Visualize your baby's health patterns over time",
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
             const SizedBox(height: 20),
 
             // Time Range Selector
@@ -162,8 +180,7 @@ class _TrendsScreenState extends State<TrendsScreen> {
                 selectedColor: Colors.white,
                 fillColor: AppTheme.primaryMain,
                 color: AppTheme.textSecondary,
-                constraints:
-                    const BoxConstraints(minWidth: 80, minHeight: 36),
+                constraints: const BoxConstraints(minWidth: 80, minHeight: 36),
                 children: const [
                   Text('24 Hours', style: TextStyle(fontSize: 12)),
                   Text('7 Days', style: TextStyle(fontSize: 12)),
@@ -265,9 +282,11 @@ class _TrendsScreenState extends State<TrendsScreen> {
           ),
           leftTitles: _leftTitles(interval: 10),
           topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
+            sideTitles: SideTitles(showTitles: false),
+          ),
           rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
+            sideTitles: SideTitles(showTitles: false),
+          ),
         ),
         minY: 80,
         maxY: 150,
@@ -317,12 +336,15 @@ class _TrendsScreenState extends State<TrendsScreen> {
               getTitlesWidget: (value, meta) {
                 final idx = value.toInt();
                 if (idx >= 0 && idx < _dailyVitals.length) {
-                  final parts =
-                      (_dailyVitals[idx]['date'] as String).split('-');
+                  final parts = (_dailyVitals[idx]['date'] as String).split(
+                    '-',
+                  );
                   return Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Text('${parts[2]}/${parts[1]}',
-                        style: const TextStyle(fontSize: 9)),
+                    child: Text(
+                      '${parts[2]}/${parts[1]}',
+                      style: const TextStyle(fontSize: 9),
+                    ),
                   );
                 }
                 return const SizedBox.shrink();
@@ -332,9 +354,11 @@ class _TrendsScreenState extends State<TrendsScreen> {
           ),
           leftTitles: _leftTitles(interval: 10),
           topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
+            sideTitles: SideTitles(showTitles: false),
+          ),
           rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
+            sideTitles: SideTitles(showTitles: false),
+          ),
         ),
         minY: 80,
         maxY: 150,
@@ -353,8 +377,12 @@ class _TrendsScreenState extends State<TrendsScreen> {
             spots: _dailyVitals
                 .asMap()
                 .entries
-                .map((e) =>
-                    FlSpot(e.key.toDouble(), (e.value['avgHr'] as num).toDouble()))
+                .map(
+                  (e) => FlSpot(
+                    e.key.toDouble(),
+                    (e.value['avgHr'] as num).toDouble(),
+                  ),
+                )
                 .toList(),
             isCurved: true,
             color: AppTheme.errorMain,
@@ -401,9 +429,11 @@ class _TrendsScreenState extends State<TrendsScreen> {
           ),
           leftTitles: _leftTitles(interval: 5),
           topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
+            sideTitles: SideTitles(showTitles: false),
+          ),
           rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
+            sideTitles: SideTitles(showTitles: false),
+          ),
         ),
         minY: 15,
         maxY: 45,
@@ -453,12 +483,15 @@ class _TrendsScreenState extends State<TrendsScreen> {
               getTitlesWidget: (value, meta) {
                 final idx = value.toInt();
                 if (idx >= 0 && idx < _dailyVitals.length) {
-                  final parts =
-                      (_dailyVitals[idx]['date'] as String).split('-');
+                  final parts = (_dailyVitals[idx]['date'] as String).split(
+                    '-',
+                  );
                   return Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Text('${parts[2]}/${parts[1]}',
-                        style: const TextStyle(fontSize: 9)),
+                    child: Text(
+                      '${parts[2]}/${parts[1]}',
+                      style: const TextStyle(fontSize: 9),
+                    ),
                   );
                 }
                 return const SizedBox.shrink();
@@ -468,9 +501,11 @@ class _TrendsScreenState extends State<TrendsScreen> {
           ),
           leftTitles: _leftTitles(interval: 5),
           topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
+            sideTitles: SideTitles(showTitles: false),
+          ),
           rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false)),
+            sideTitles: SideTitles(showTitles: false),
+          ),
         ),
         minY: 15,
         maxY: 45,
@@ -489,8 +524,12 @@ class _TrendsScreenState extends State<TrendsScreen> {
             spots: _dailyVitals
                 .asMap()
                 .entries
-                .map((e) =>
-                    FlSpot(e.key.toDouble(), (e.value['avgBr'] as num).toDouble()))
+                .map(
+                  (e) => FlSpot(
+                    e.key.toDouble(),
+                    (e.value['avgBr'] as num).toDouble(),
+                  ),
+                )
                 .toList(),
             isCurved: true,
             color: AppTheme.successMain,
@@ -559,13 +598,20 @@ class _TrendsScreenState extends State<TrendsScreen> {
         children: [
           Icon(icon, color: color, size: 28),
           const SizedBox(height: 8),
-          Text(value,
-              style: TextStyle(
-                  fontSize: 28, fontWeight: FontWeight.bold, color: color)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
           const SizedBox(height: 4),
           Text(label, style: const TextStyle(fontSize: 12)),
-          Text(status,
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+          Text(
+            status,
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+          ),
         ],
       ),
     );
@@ -578,8 +624,7 @@ class _TrendsScreenState extends State<TrendsScreen> {
       color: AppTheme.primaryLight.withValues(alpha: 0.1),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-            color: AppTheme.primaryLight.withValues(alpha: 0.3)),
+        side: BorderSide(color: AppTheme.primaryLight.withValues(alpha: 0.3)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -595,10 +640,12 @@ class _TrendsScreenState extends State<TrendsScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            ..._insights.map((i) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _insightItem(i['label']!, i['text']!),
-                )),
+            ..._insights.map(
+              (i) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _insightItem(i['label']!, i['text']!),
+              ),
+            ),
           ],
         ),
       ),
@@ -618,11 +665,9 @@ class _TrendsScreenState extends State<TrendsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: Theme.of(context).textTheme.headlineSmall),
+            Text(title, style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 4),
-            Text(subtitle,
-                style: Theme.of(context).textTheme.bodySmall),
+            Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 16),
             child,
           ],
@@ -640,7 +685,9 @@ class _TrendsScreenState extends State<TrendsScreen> {
           child: RichText(
             text: TextSpan(
               style: const TextStyle(
-                  fontSize: 13, color: AppTheme.textSecondary),
+                fontSize: 13,
+                color: AppTheme.textSecondary,
+              ),
               children: [
                 TextSpan(
                   text: boldText,
@@ -660,10 +707,8 @@ class _TrendsScreenState extends State<TrendsScreen> {
       show: true,
       drawVerticalLine: false,
       horizontalInterval: 10,
-      getDrawingHorizontalLine: (value) => FlLine(
-        color: Colors.grey.shade200,
-        strokeWidth: 1,
-      ),
+      getDrawingHorizontalLine: (value) =>
+          FlLine(color: Colors.grey.shade200, strokeWidth: 1),
     );
   }
 
@@ -673,10 +718,8 @@ class _TrendsScreenState extends State<TrendsScreen> {
         showTitles: true,
         reservedSize: 32,
         interval: interval,
-        getTitlesWidget: (value, meta) => Text(
-          '${value.toInt()}',
-          style: const TextStyle(fontSize: 10),
-        ),
+        getTitlesWidget: (value, meta) =>
+            Text('${value.toInt()}', style: const TextStyle(fontSize: 10)),
       ),
     );
   }
@@ -702,8 +745,10 @@ class _TrendsScreenState extends State<TrendsScreen> {
             Text(
               'No trend data yet',
               style: TextStyle(
-                  fontSize: 16, color: Colors.grey.shade500,
-                  fontWeight: FontWeight.w500),
+                fontSize: 16,
+                color: Colors.grey.shade500,
+                fontWeight: FontWeight.w500,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -734,9 +779,11 @@ class _TrendsScreenState extends State<TrendsScreen> {
           children: [
             Icon(Icons.cloud_off, size: 48, color: Colors.grey.shade400),
             const SizedBox(height: 12),
-            Text(_error!,
-                style: TextStyle(color: Colors.grey.shade500),
-                textAlign: TextAlign.center),
+            Text(
+              _error!,
+              style: TextStyle(color: Colors.grey.shade500),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: _fetchData,
