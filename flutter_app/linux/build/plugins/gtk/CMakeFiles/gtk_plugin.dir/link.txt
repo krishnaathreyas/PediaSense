@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -dynamiclib -Wl,-headerpad_max_install_names -o libgtk_plugin.dylib -install_name @rpath/libgtk_plugin.dylib CMakeFiles/gtk_plugin.dir/gtk_plugin.cc.o  /Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/libflutter_linux_gtk.so

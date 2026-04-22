@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/build/cmake_install.cmake",
+		"/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/build/flutter/cmake_install.cmake",
+		"/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/build/runner/cmake_install.cmake",
+		"/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/build/plugins/gtk/cmake_install.cmake",
+		"/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/build/plugins/url_launcher_linux/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
