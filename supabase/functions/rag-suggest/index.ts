@@ -9,7 +9,7 @@ const CORS_HEADERS = {
 };
 
 const EMBEDDING_MODEL = "models/gemini-embedding-001";
-const GENERATION_MODEL = "models/gemini-2.0-flash";
+const GENERATION_MODEL = "models/gemini-2.5-flash";
 const MATCH_COUNT = 5;
 
 type Severity = "normal" | "monitor" | "urgent";
@@ -172,6 +172,42 @@ function buildContext(chunks: RetrievedChunk[]): string {
     .join("\n\n");
 }
 
+function tryParseModelJson(rawText: string): Record<string, unknown> | null {
+  const direct = rawText.trim();
+  if (!direct) return null;
+
+  try {
+    return JSON.parse(direct) as Record<string, unknown>;
+  } catch {
+    // Fall through to fence/braces cleanup.
+  }
+
+  const unfenced = direct
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(unfenced) as Record<string, unknown>;
+  } catch {
+    // Fall through to brace extraction.
+  }
+
+  const firstBrace = unfenced.indexOf("{");
+  const lastBrace = unfenced.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    return null;
+  }
+
+  const betweenBraces = unfenced.slice(firstBrace, lastBrace + 1);
+  try {
+    return JSON.parse(betweenBraces) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 async function generateGroundedAnswer(
   question: string,
   chunks: RetrievedChunk[],
@@ -180,7 +216,7 @@ async function generateGroundedAnswer(
 ): Promise<GeneratedAnswer> {
   const context = buildContext(chunks);
 
-  const prompt = `You are a pediatric clinical guidance assistant for infant caregivers.
+  const basePrompt = `You are a pediatric clinical guidance assistant for infant caregivers.
 Use only the provided WHO IMCI / IAP context. If any detail is not in context, do not invent it.
 
 Safety requirements:
@@ -203,39 +239,67 @@ ${question}
 Context:
 ${context}`;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/${GENERATION_MODEL}:generateContent?key=${geminiApiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2,
-          topP: 0.8,
-          maxOutputTokens: 900,
-          responseMimeType: "application/json",
-        },
-      }),
+  let parsed: Record<string, unknown> | null = null;
+  let parseFailureDetails = "";
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const retryNote =
+      attempt === 1
+        ? ""
+        : "\n\nYour previous response was invalid JSON. Return only valid JSON for the exact schema, with no markdown fences and no extra text.";
+
+    const prompt = `${basePrompt}${retryNote}`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/${GENERATION_MODEL}:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            topP: 0.8,
+            maxOutputTokens: 900,
+            responseMimeType: "application/json",
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Gemini generation error (${response.status}): ${errText}`);
     }
-  );
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini generation error (${response.status}): ${errText}`);
+    const payload = await response.json();
+    const rawText = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (typeof rawText !== "string" || rawText.trim().length === 0) {
+      parseFailureDetails = "Gemini generation returned empty content";
+      continue;
+    }
+
+    logStage(requestId, "generate.raw_output", {
+      attempt,
+      model: GENERATION_MODEL,
+      chars: rawText.length,
+      preview: rawText.slice(0, 400),
+    });
+
+    parsed = tryParseModelJson(rawText);
+    if (parsed) {
+      break;
+    }
+
+    parseFailureDetails = `Invalid JSON returned (attempt ${attempt})`;
+    logStage(requestId, "generate.parse_failed", {
+      attempt,
+      preview: rawText.slice(0, 240),
+    });
   }
 
-  const payload = await response.json();
-  const rawText = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (typeof rawText !== "string" || rawText.trim().length === 0) {
-    throw new Error("Gemini generation returned empty content");
-  }
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(rawText) as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(`Failed to parse generation JSON: ${String(error)}`);
+  if (!parsed) {
+    throw new Error(`Failed to parse generation JSON: ${parseFailureDetails || "unknown parse failure"}`);
   }
 
   const answer: GeneratedAnswer = {
