@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/cmake_install.cmake",
+		"/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/flutter/cmake_install.cmake",
+		"/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/runner/cmake_install.cmake",
+		"/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/plugins/gtk/cmake_install.cmake",
+		"/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/plugins/url_launcher_linux/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

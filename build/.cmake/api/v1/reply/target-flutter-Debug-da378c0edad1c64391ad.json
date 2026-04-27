@@ -1,0 +1,102 @@
+{
+	"abstract" : true,
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"target_link_libraries",
+			"add_dependencies"
+		],
+		"files" : 
+		[
+			"flutter/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 72,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 76,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 77,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 82,
+				"parent" : 0
+			}
+		]
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 9
+	},
+	"id" : "flutter::@2bb09fbb03a373b2cb34",
+	"interfaceCompileDependencies" : 
+	[
+		{
+			"backtrace" : 3,
+			"id" : "PkgConfig::GTK::@2bb09fbb03a373b2cb34"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "PkgConfig::GLIB::@2bb09fbb03a373b2cb34"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "PkgConfig::GIO::@2bb09fbb03a373b2cb34"
+		}
+	],
+	"interfaceLinkLibraries" : 
+	[
+		{
+			"backtrace" : 2,
+			"fragment" : "/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/libflutter_linux_gtk.so"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "PkgConfig::GTK::@2bb09fbb03a373b2cb34"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "PkgConfig::GLIB::@2bb09fbb03a373b2cb34"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "PkgConfig::GIO::@2bb09fbb03a373b2cb34"
+		}
+	],
+	"name" : "flutter",
+	"orderDependencies" : 
+	[
+		{
+			"backtrace" : 4,
+			"id" : "flutter_assemble::@2bb09fbb03a373b2cb34"
+		}
+	],
+	"paths" : 
+	{
+		"build" : "flutter",
+		"source" : "flutter"
+	},
+	"sources" : [],
+	"type" : "INTERFACE_LIBRARY"
+}

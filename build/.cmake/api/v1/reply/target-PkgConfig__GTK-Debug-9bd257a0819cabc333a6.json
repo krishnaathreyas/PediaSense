@@ -1,0 +1,43 @@
+{
+	"abstract" : true,
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library"
+		],
+		"files" : 
+		[
+			"flutter/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 32,
+				"parent" : 0
+			}
+		]
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 9
+	},
+	"id" : "PkgConfig::GTK::@2bb09fbb03a373b2cb34",
+	"imported" : true,
+	"local" : true,
+	"name" : "PkgConfig::GTK",
+	"paths" : 
+	{
+		"build" : "flutter",
+		"source" : "flutter"
+	},
+	"sources" : [],
+	"type" : "INTERFACE_LIBRARY"
+}

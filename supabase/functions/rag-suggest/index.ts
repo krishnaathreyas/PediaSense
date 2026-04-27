@@ -172,40 +172,84 @@ function buildContext(chunks: RetrievedChunk[]): string {
     .join("\n\n");
 }
 
-function tryParseModelJson(rawText: string): Record<string, unknown> | null {
-  const direct = rawText.trim();
-  if (!direct) return null;
-
-  try {
-    return JSON.parse(direct) as Record<string, unknown>;
-  } catch {
-    // Fall through to fence/braces cleanup.
-  }
-
-  const unfenced = direct
+function stripMarkdownFences(text: string): string {
+  return text
+    .trim()
     .replace(/^```json\s*/i, "")
     .replace(/^```\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim();
+}
 
-  try {
-    return JSON.parse(unfenced) as Record<string, unknown>;
-  } catch {
-    // Fall through to brace extraction.
+function removeTrailingCommas(text: string): string {
+  return text.replace(/,\s*([}\]])/g, "$1");
+}
+
+function extractFirstBalancedJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let isEscaped = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (ch === "\\") {
+        isEscaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === "{") depth++;
+    if (ch === "}") depth--;
+
+    if (depth === 0) {
+      return text.slice(start, i + 1);
+    }
   }
 
-  const firstBrace = unfenced.indexOf("{");
-  const lastBrace = unfenced.lastIndexOf("}");
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    return null;
+  return null;
+}
+
+function tryParseModelJson(rawText: string): Record<string, unknown> | null {
+  const cleaned = stripMarkdownFences(rawText);
+  if (!cleaned) return null;
+
+  const candidates: string[] = [];
+  candidates.push(cleaned);
+
+  const extracted = extractFirstBalancedJsonObject(cleaned);
+  if (extracted) {
+    candidates.push(extracted);
   }
 
-  const betweenBraces = unfenced.slice(firstBrace, lastBrace + 1);
-  try {
-    return JSON.parse(betweenBraces) as Record<string, unknown>;
-  } catch {
-    return null;
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as Record<string, unknown>;
+    } catch {
+      // Try common cleanup if the model leaves trailing commas.
+    }
+
+    try {
+      return JSON.parse(removeTrailingCommas(candidate)) as Record<string, unknown>;
+    } catch {
+      // Try next candidate.
+    }
   }
+
+  return null;
 }
 
 async function generateGroundedAnswer(
@@ -242,11 +286,11 @@ ${context}`;
   let parsed: Record<string, unknown> | null = null;
   let parseFailureDetails = "";
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     const retryNote =
       attempt === 1
         ? ""
-        : "\n\nYour previous response was invalid JSON. Return only valid JSON for the exact schema, with no markdown fences and no extra text.";
+        : "\n\nYour previous response was invalid JSON. Return only valid minified JSON for the exact schema, with no markdown fences and no extra text.";
 
     const prompt = `${basePrompt}${retryNote}`;
 
@@ -260,8 +304,18 @@ ${context}`;
           generationConfig: {
             temperature: 0.2,
             topP: 0.8,
-            maxOutputTokens: 900,
+            maxOutputTokens: 1200,
             responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                title: { type: "STRING" },
+                severity: { type: "STRING", enum: ["normal", "monitor", "urgent"] },
+                actions: { type: "ARRAY", items: { type: "STRING" } },
+                hospitalCriteria: { type: "ARRAY", items: { type: "STRING" } },
+              },
+              required: ["title", "severity", "actions", "hospitalCriteria"],
+            },
           },
         }),
       }
@@ -273,20 +327,35 @@ ${context}`;
     }
 
     const payload = await response.json();
+    const finishReason = payload?.candidates?.[0]?.finishReason ?? "UNKNOWN";
     const rawText = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (typeof rawText !== "string" || rawText.trim().length === 0) {
-      parseFailureDetails = "Gemini generation returned empty content";
+      parseFailureDetails = `Gemini generation returned empty content (finishReason=${finishReason})`;
       continue;
     }
+
+    console.log("========== GEMINI RAW OUTPUT START ==========");
+    console.log(rawText);
+    console.log("========== GEMINI RAW OUTPUT END ==========");
 
     logStage(requestId, "generate.raw_output", {
       attempt,
       model: GENERATION_MODEL,
+      finishReason,
       chars: rawText.length,
       preview: rawText.slice(0, 400),
     });
 
-    parsed = tryParseModelJson(rawText);
+    console.log("Attempting JSON parse...");
+    try {
+      parsed = JSON.parse(rawText) as Record<string, unknown>;
+    } catch (err) {
+      console.error("JSON PARSE FAILED");
+      console.error("Raw text was:");
+      console.error(rawText);
+      parsed = tryParseModelJson(rawText);
+    }
+
     if (parsed) {
       break;
     }

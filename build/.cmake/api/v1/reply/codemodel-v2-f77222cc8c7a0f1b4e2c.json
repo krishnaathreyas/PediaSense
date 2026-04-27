@@ -1,0 +1,234 @@
+{
+	"configurations" : 
+	[
+		{
+			"abstractTargets" : 
+			[
+				{
+					"directoryIndex" : 1,
+					"id" : "PkgConfig::GIO::@2bb09fbb03a373b2cb34",
+					"jsonFile" : "target-PkgConfig__GIO-Debug-f7da3f42ca4f71972774.json",
+					"name" : "PkgConfig::GIO",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "PkgConfig::GLIB::@2bb09fbb03a373b2cb34",
+					"jsonFile" : "target-PkgConfig__GLIB-Debug-30e6608348f18c263c71.json",
+					"name" : "PkgConfig::GLIB",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "PkgConfig::GTK::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-PkgConfig__GTK-Debug-b9a6ca5f892ad51936cb.json",
+					"name" : "PkgConfig::GTK",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "PkgConfig::GTK::@2bb09fbb03a373b2cb34",
+					"jsonFile" : "target-PkgConfig__GTK-Debug-9bd257a0819cabc333a6.json",
+					"name" : "PkgConfig::GTK",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "flutter::@2bb09fbb03a373b2cb34",
+					"jsonFile" : "target-flutter-Debug-da378c0edad1c64391ad.json",
+					"name" : "flutter",
+					"projectIndex" : 0
+				}
+			],
+			"directories" : 
+			[
+				{
+					"abstractTargetIndexes" : 
+					[
+						2
+					],
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1,
+						2,
+						3,
+						4
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-Debug-dc5a3c997d4300b40c0f.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.13"
+					},
+					"projectIndex" : 0,
+					"source" : "."
+				},
+				{
+					"abstractTargetIndexes" : 
+					[
+						0,
+						1,
+						3,
+						4
+					],
+					"build" : "flutter",
+					"jsonFile" : "directory-flutter-Debug-8c6948c963ff8a700163.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.10"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "flutter",
+					"targetIndexes" : 
+					[
+						0
+					]
+				},
+				{
+					"build" : "runner",
+					"jsonFile" : "directory-runner-Debug-a82e021081316c606242.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.13"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "runner",
+					"targetIndexes" : 
+					[
+						2
+					]
+				},
+				{
+					"build" : "plugins/gtk",
+					"jsonFile" : "directory-plugins.gtk-Debug-8d8ae6e7501ad8d6befa.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.10"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 1,
+					"source" : "flutter/ephemeral/.plugin_symlinks/gtk/linux",
+					"targetIndexes" : 
+					[
+						1
+					]
+				},
+				{
+					"build" : "plugins/url_launcher_linux",
+					"jsonFile" : "directory-plugins.url_launcher_linux-Debug-eff8475adc7488d5a7e6.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.10"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 2,
+					"source" : "flutter/ephemeral/.plugin_symlinks/url_launcher_linux/linux",
+					"targetIndexes" : 
+					[
+						3
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"abstractTargetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4
+					],
+					"childIndexes" : 
+					[
+						1,
+						2
+					],
+					"directoryIndexes" : 
+					[
+						0,
+						1,
+						2
+					],
+					"name" : "runner",
+					"targetIndexes" : 
+					[
+						0,
+						2
+					]
+				},
+				{
+					"directoryIndexes" : 
+					[
+						3
+					],
+					"name" : "gtk",
+					"parentIndex" : 0,
+					"targetIndexes" : 
+					[
+						1
+					]
+				},
+				{
+					"directoryIndexes" : 
+					[
+						4
+					],
+					"name" : "url_launcher_linux",
+					"parentIndex" : 0,
+					"targetIndexes" : 
+					[
+						3
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 1,
+					"id" : "flutter_assemble::@2bb09fbb03a373b2cb34",
+					"jsonFile" : "target-flutter_assemble-Debug-1899ba9a96024d119b21.json",
+					"name" : "flutter_assemble",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 3,
+					"id" : "gtk_plugin::@9c945c6e51291198ce71",
+					"jsonFile" : "target-gtk_plugin-Debug-e1aa3fb17e556c2c99a8.json",
+					"name" : "gtk_plugin",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "pediasense_app::@056c4f61b0156d1d9b06",
+					"jsonFile" : "target-pediasense_app-Debug-30f1c6620dc815d97941.json",
+					"name" : "pediasense_app",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 4,
+					"id" : "url_launcher_linux_plugin::@f99505b10d3d80eeda47",
+					"jsonFile" : "target-url_launcher_linux_plugin-Debug-a6643c6ac1b25fc910ef.json",
+					"name" : "url_launcher_linux_plugin",
+					"projectIndex" : 2
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build",
+		"source" : "/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 9
+	}
+}

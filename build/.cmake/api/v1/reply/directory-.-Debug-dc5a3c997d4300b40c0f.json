@@ -1,0 +1,171 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"install"
+		],
+		"files" : 
+		[
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 88,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 95,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 98,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 101,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 105,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 105,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 112,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 119,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 122,
+				"parent" : 0
+			}
+		]
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 9
+	},
+	"installers" : 
+	[
+		{
+			"backtrace" : 1,
+			"component" : "Runtime",
+			"type" : "code"
+		},
+		{
+			"backtrace" : 2,
+			"component" : "Runtime",
+			"destination" : "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/bundle",
+			"paths" : 
+			[
+				"intermediates_do_not_run/pediasense_app"
+			],
+			"targetId" : "pediasense_app::@056c4f61b0156d1d9b06",
+			"targetIndex" : 2,
+			"type" : "target"
+		},
+		{
+			"backtrace" : 3,
+			"component" : "Runtime",
+			"destination" : "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/bundle/data",
+			"paths" : 
+			[
+				"flutter/ephemeral/icudtl.dat"
+			],
+			"type" : "file"
+		},
+		{
+			"backtrace" : 4,
+			"component" : "Runtime",
+			"destination" : "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/bundle/lib",
+			"paths" : 
+			[
+				"flutter/ephemeral/libflutter_linux_gtk.so"
+			],
+			"type" : "file"
+		},
+		{
+			"backtrace" : 5,
+			"component" : "Runtime",
+			"destination" : "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/bundle/lib",
+			"paths" : 
+			[
+				"/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/plugins/gtk/libgtk_plugin.dylib"
+			],
+			"type" : "file"
+		},
+		{
+			"backtrace" : 6,
+			"component" : "Runtime",
+			"destination" : "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/bundle/lib",
+			"paths" : 
+			[
+				"/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/plugins/url_launcher_linux/liburl_launcher_linux_plugin.dylib"
+			],
+			"type" : "file"
+		},
+		{
+			"backtrace" : 7,
+			"component" : "Runtime",
+			"destination" : "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/bundle/lib",
+			"paths" : 
+			[
+				{
+					"from" : "/build/native_assets/linux",
+					"to" : "."
+				}
+			],
+			"type" : "directory"
+		},
+		{
+			"backtrace" : 8,
+			"component" : "Runtime",
+			"type" : "code"
+		},
+		{
+			"backtrace" : 9,
+			"component" : "Runtime",
+			"destination" : "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/bundle/data",
+			"paths" : 
+			[
+				"/build//flutter_assets"
+			],
+			"type" : "directory"
+		}
+	],
+	"paths" : 
+	{
+		"build" : ".",
+		"source" : "."
+	}
+}

@@ -1,0 +1,38 @@
+[
+{
+  "directory": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/runner",
+  "command": "/usr/bin/c++ -DAPPLICATION_ID=\\\"com.pediasense.pediasense_app\\\" -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/gtk/linux/include -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/url_launcher_linux/linux/include -g -Wall -Werror -o CMakeFiles/pediasense_app.dir/main.cc.o -c /Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/runner/main.cc",
+  "file": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/runner/main.cc",
+  "output": "runner/CMakeFiles/pediasense_app.dir/main.cc.o"
+},
+{
+  "directory": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/runner",
+  "command": "/usr/bin/c++ -DAPPLICATION_ID=\\\"com.pediasense.pediasense_app\\\" -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/gtk/linux/include -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/url_launcher_linux/linux/include -g -Wall -Werror -o CMakeFiles/pediasense_app.dir/my_application.cc.o -c /Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/runner/my_application.cc",
+  "file": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/runner/my_application.cc",
+  "output": "runner/CMakeFiles/pediasense_app.dir/my_application.cc.o"
+},
+{
+  "directory": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/runner",
+  "command": "/usr/bin/c++ -DAPPLICATION_ID=\\\"com.pediasense.pediasense_app\\\" -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/gtk/linux/include -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/url_launcher_linux/linux/include -g -Wall -Werror -o CMakeFiles/pediasense_app.dir/__/flutter/generated_plugin_registrant.cc.o -c /Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/generated_plugin_registrant.cc",
+  "file": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/generated_plugin_registrant.cc",
+  "output": "runner/CMakeFiles/pediasense_app.dir/__/flutter/generated_plugin_registrant.cc.o"
+},
+{
+  "directory": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/plugins/gtk",
+  "command": "/usr/bin/c++ -DFLUTTER_PLUGIN_IMPL -Dgtk_plugin_EXPORTS -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral -g -fPIC -fvisibility=hidden -Wall -Werror -o CMakeFiles/gtk_plugin.dir/gtk_plugin.cc.o -c /Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/gtk/linux/gtk_plugin.cc",
+  "file": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/gtk/linux/gtk_plugin.cc",
+  "output": "plugins/gtk/CMakeFiles/gtk_plugin.dir/gtk_plugin.cc.o"
+},
+{
+  "directory": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/plugins/url_launcher_linux",
+  "command": "/usr/bin/c++ -DFLUTTER_PLUGIN_IMPL -Durl_launcher_linux_plugin_EXPORTS -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral -g -fPIC -fvisibility=hidden -Wall -Werror -o CMakeFiles/url_launcher_linux_plugin.dir/messages.g.cc.o -c /Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/url_launcher_linux/linux/messages.g.cc",
+  "file": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/url_launcher_linux/linux/messages.g.cc",
+  "output": "plugins/url_launcher_linux/CMakeFiles/url_launcher_linux_plugin.dir/messages.g.cc.o"
+},
+{
+  "directory": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/plugins/url_launcher_linux",
+  "command": "/usr/bin/c++ -DFLUTTER_PLUGIN_IMPL -Durl_launcher_linux_plugin_EXPORTS -I/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral -g -fPIC -fvisibility=hidden -Wall -Werror -o CMakeFiles/url_launcher_linux_plugin.dir/url_launcher_plugin.cc.o -c /Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/url_launcher_linux/linux/url_launcher_plugin.cc",
+  "file": "/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/url_launcher_linux/linux/url_launcher_plugin.cc",
+  "output": "plugins/url_launcher_linux/CMakeFiles/url_launcher_linux_plugin.dir/url_launcher_plugin.cc.o"
+}
+]
