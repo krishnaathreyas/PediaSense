@@ -52,7 +52,7 @@ class _CaregiverSetupScreenState extends State<CaregiverSetupScreen> {
     if (!mounted) return;
 
     if (hasProfile) {
-      Navigator.pushReplacementNamed(context, '/home');
+      Navigator.pushReplacementNamed(context, '/device');
       return;
     }
 

@@ -36,8 +36,8 @@ class RagService {
   VitalsData? _currentVitals;
   VitalsData? get currentVitals => _currentVitals;
 
-  /// Track the last risk level we fetched for, to avoid repeat calls.
-  String? _lastFetchedRiskLevel;
+  /// Track the last severity we fetched for, to avoid repeat calls.
+  String? _lastFetchedSeverity;
 
   /// Debounce timer — prevents rapid-fire API calls on flapping vitals.
   Timer? _debounceTimer;
@@ -51,6 +51,35 @@ class RagService {
   int _babyAgeMonths = 12;
   bool _isLBW = false;
 
+  String _severityForVitals(VitalsData vitals) {
+    // Conservative heuristics to drive guidance fetching.
+    // This does NOT replace clinical judgment.
+    final hr = vitals.hr;
+    final spo2 = vitals.spo2;
+    final br = vitals.br;
+    final temp = vitals.skinTemp;
+
+    final urgent =
+        spo2 < 90 ||
+        hr < 80 ||
+        hr > 200 ||
+        br < 20 ||
+        br > 80 ||
+        temp < 35.5 ||
+        temp > 38.5;
+    if (urgent) return 'urgent';
+
+    final monitor =
+        (spo2 >= 90 && spo2 <= 93) ||
+        (hr >= 180 && hr <= 200) ||
+        (br >= 61 && br <= 80) ||
+        (temp >= 38.0 && temp <= 38.5) ||
+        (temp >= 35.5 && temp <= 36.0);
+    if (monitor) return 'monitor';
+
+    return 'normal';
+  }
+
   /// Call this whenever vitals update. It will decide whether to fetch.
   void onVitalsUpdate(
     VitalsData vitals, {
@@ -61,34 +90,34 @@ class RagService {
     _babyAgeMonths = babyAgeMonths;
     _isLBW = isLBW;
 
-    final riskLevel = vitals.riskLevelString;
+    final severity = _severityForVitals(vitals);
 
     _log('onVitalsUpdate.received', {
-      'risk': riskLevel,
-      'hr': vitals.heartRate,
+      'severity': severity,
+      'hr': vitals.hr,
       'spo2': vitals.spo2,
-      'br': vitals.breathingRate,
+      'br': vitals.br,
       'temp': vitals.skinTemp,
       'ageMonths': babyAgeMonths,
       'isLBW': isLBW,
     });
 
     // Only fetch on AMBER or RED
-    if (riskLevel == 'normal') {
+    if (severity == 'normal') {
       _log('onVitalsUpdate.skip_normal', {
-        'lastFetchedRisk': _lastFetchedRiskLevel,
+        'lastFetchedSeverity': _lastFetchedSeverity,
       });
-      if (_lastFetchedRiskLevel != 'normal') {
-        _lastFetchedRiskLevel = 'normal';
+      if (_lastFetchedSeverity != 'normal') {
+        _lastFetchedSeverity = 'normal';
         _lastSuggestion = null;
       }
       return;
     }
 
     // Don't re-fetch if we already have a suggestion for this risk level
-    if (riskLevel == _lastFetchedRiskLevel && _lastSuggestion != null) {
+    if (severity == _lastFetchedSeverity && _lastSuggestion != null) {
       _log('onVitalsUpdate.skip_cached', {
-        'risk': riskLevel,
+        'severity': severity,
         'isFromRAG': _lastSuggestion?.isFromRAG,
       });
       return;
@@ -98,10 +127,10 @@ class RagService {
     _debounceTimer?.cancel();
     _log('onVitalsUpdate.debounce_scheduled', {
       'delayMs': _debounceDuration.inMilliseconds,
-      'risk': riskLevel,
+      'severity': severity,
     });
     _debounceTimer = Timer(_debounceDuration, () {
-      _log('onVitalsUpdate.debounce_fire', {'risk': riskLevel});
+      _log('onVitalsUpdate.debounce_fire', {'severity': severity});
       _fetchSuggestion(vitals, babyAgeMonths: babyAgeMonths, isLBW: isLBW);
     });
   }
@@ -126,11 +155,13 @@ class RagService {
 
       // Include current vitals for context if available
       if (_currentVitals != null) {
-        payload['heartRate'] = _currentVitals!.heartRate;
+        final current = _currentVitals!;
+
+        payload['heartRate'] = current.hr;
         payload['spo2'] = _currentVitals!.spo2;
-        payload['breathingRate'] = _currentVitals!.breathingRate;
-        payload['skinTemp'] = _currentVitals!.skinTemp;
-        payload['riskLevel'] = _currentVitals!.riskLevelString;
+        payload['breathingRate'] = current.br;
+        payload['skinTemp'] = current.skinTemp;
+        payload['riskLevel'] = _severityForVitals(current);
       }
 
       _log('askQuestion.invoke', {'payloadKeys': payload.keys.join(',')});
@@ -177,7 +208,9 @@ class RagService {
         'durationMs': DateTime.now().difference(startedAt).inMilliseconds,
       });
       final fallback = RagSuggestion.localFallback(
-        _currentVitals?.riskLevelString ?? 'monitor',
+        _currentVitals == null
+            ? 'monitor'
+            : _severityForVitals(_currentVitals!),
       );
       _lastSuggestion = fallback;
       return fallback;
@@ -198,12 +231,12 @@ class RagService {
     _isFetching = true;
     final startedAt = DateTime.now();
 
-    final riskLevel = vitals.riskLevelString;
+    final severity = _severityForVitals(vitals);
     _log('_fetchSuggestion.start', {
-      'risk': riskLevel,
-      'hr': vitals.heartRate,
+      'severity': severity,
+      'hr': vitals.hr,
       'spo2': vitals.spo2,
-      'br': vitals.breathingRate,
+      'br': vitals.br,
       'temp': vitals.skinTemp,
       'ageMonths': babyAgeMonths,
       'isLBW': isLBW,
@@ -211,11 +244,11 @@ class RagService {
 
     try {
       final payload = {
-        'heartRate': vitals.heartRate,
+        'heartRate': vitals.hr,
         'spo2': vitals.spo2,
-        'breathingRate': vitals.breathingRate,
+        'breathingRate': vitals.br,
         'skinTemp': vitals.skinTemp,
-        'riskLevel': riskLevel,
+        'riskLevel': severity,
         'babyAgeMonths': babyAgeMonths,
         'isLBW': isLBW,
       };
@@ -251,7 +284,7 @@ class RagService {
       final suggestion = RagSuggestion.fromJson(json);
 
       _lastSuggestion = suggestion;
-      _lastFetchedRiskLevel = riskLevel;
+      _lastFetchedSeverity = severity;
       _suggestionController.add(suggestion);
       _log('_fetchSuggestion.success', {
         'isFromRAG': suggestion.isFromRAG,
@@ -264,9 +297,9 @@ class RagService {
         'error': e.toString(),
         'durationMs': DateTime.now().difference(startedAt).inMilliseconds,
       });
-      final fallback = RagSuggestion.localFallback(riskLevel);
+      final fallback = RagSuggestion.localFallback(severity);
       _lastSuggestion = fallback;
-      _lastFetchedRiskLevel = riskLevel;
+      _lastFetchedSeverity = severity;
       _suggestionController.add(fallback);
     } finally {
       _isFetching = false;
@@ -280,11 +313,11 @@ class RagService {
     bool isLBW = false,
   }) async {
     _log('refresh.start', {
-      'risk': vitals.riskLevelString,
+      'severity': _severityForVitals(vitals),
       'ageMonths': babyAgeMonths,
       'isLBW': isLBW,
     });
-    _lastFetchedRiskLevel = null;
+    _lastFetchedSeverity = null;
     _debounceTimer?.cancel();
     await _fetchSuggestion(vitals, babyAgeMonths: babyAgeMonths, isLBW: isLBW);
   }

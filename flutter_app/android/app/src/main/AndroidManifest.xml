@@ -4,7 +4,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
 
     <!-- Android 12+ BLE permissions -->
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <!-- Location — needed for BLE scan results on most Android versions -->

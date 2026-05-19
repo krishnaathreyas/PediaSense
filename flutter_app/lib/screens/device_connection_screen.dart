@@ -17,9 +17,17 @@ import '../theme/app_theme.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool _isPediaSenseDevice(ScanResult result) {
-  // Check 1: Device name starts with "PediaSense"
-  final name = result.device.platformName;
-  if (name.toLowerCase().startsWith('pediasense')) return true;
+  // Check 1: Device name matches expected ESP32 name OR legacy PediaSense prefix
+  final name = result.device.platformName.trim();
+  final advName = result.advertisementData.advName.trim();
+  final effectiveName = (name.isNotEmpty ? name : advName).toLowerCase();
+
+  if (effectiveName == EspBleService.targetDeviceName.toLowerCase()) {
+    return true;
+  }
+  if (effectiveName.startsWith(EspBleService.legacyNamePrefix.toLowerCase())) {
+    return true;
+  }
 
   // Check 2: Advertisement contains PediaSense service UUID
   final adServiceUuids = result.advertisementData.serviceUuids;
@@ -130,7 +138,7 @@ class _DeviceConnectionScreenState extends State<DeviceConnectionScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Only PediaSense devices are supported'),
+          content: Text('Only PediaSense / ESP32_BLE devices are supported'),
           backgroundColor: AppTheme.warningDark,
           duration: Duration(seconds: 2),
         ),
@@ -283,9 +291,7 @@ class _DeviceConnectionScreenState extends State<DeviceConnectionScreen> {
           child: Icon(
             _isConnected
                 ? Icons.bluetooth_connected
-                : (_isScanning
-                    ? Icons.bluetooth_searching
-                    : Icons.bluetooth),
+                : (_isScanning ? Icons.bluetooth_searching : Icons.bluetooth),
             color: Colors.white,
             size: 26,
           ),
@@ -304,8 +310,8 @@ class _DeviceConnectionScreenState extends State<DeviceConnectionScreen> {
                 _isConnected
                     ? 'Connected to $_connectingDeviceName'
                     : (_isConnecting
-                        ? 'Connecting to $_connectingDeviceName...'
-                        : 'Pair your PediaSense wearable'),
+                          ? 'Connecting to $_connectingDeviceName...'
+                          : 'Pair your PediaSense wearable'),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -374,7 +380,8 @@ class _DeviceConnectionScreenState extends State<DeviceConnectionScreen> {
         : 'Unknown Device';
     final deviceId = result.device.remoteId.str;
     final rssi = result.rssi;
-    final isThisConnecting = _isConnecting &&
+    final isThisConnecting =
+        _isConnecting &&
         _connectingDeviceName ==
             (result.device.platformName.isNotEmpty
                 ? result.device.platformName
@@ -407,10 +414,7 @@ class _DeviceConnectionScreenState extends State<DeviceConnectionScreen> {
             const SizedBox(height: 2),
             Text(
               '$rssi dBm',
-              style: TextStyle(
-                fontSize: 9,
-                color: Colors.grey.shade500,
-              ),
+              style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
             ),
           ],
         ),
@@ -459,11 +463,15 @@ class _DeviceConnectionScreenState extends State<DeviceConnectionScreen> {
                 ? null
                 : () => _handleDeviceTap(result),
             style: ElevatedButton.styleFrom(
-              backgroundColor:
-                  isSupported ? AppTheme.primaryMain : Colors.grey.shade300,
+              backgroundColor: isSupported
+                  ? AppTheme.primaryMain
+                  : Colors.grey.shade300,
               foregroundColor: Colors.white,
               padding: EdgeInsets.zero,
-              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+              textStyle: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -504,10 +512,17 @@ class _DeviceConnectionScreenState extends State<DeviceConnectionScreen> {
 
         // Proceed to dashboard
         ElevatedButton(
-          onPressed: () => Navigator.pushReplacementNamed(context, '/home'),
-          child: Text(_isConnected
-              ? 'Proceed to Dashboard'
-              : 'Proceed to Dashboard (Simulated)'),
+          onPressed: _isConnected
+              ? () => Navigator.pushReplacementNamed(context, '/home')
+              : null,
+          child: const Text('Proceed to Dashboard'),
+        ),
+
+        const SizedBox(height: 10),
+
+        OutlinedButton(
+          onPressed: () => Navigator.pushReplacementNamed(context, '/home_sim'),
+          child: const Text('Proceed to simulated dashboard'),
         ),
       ],
     );

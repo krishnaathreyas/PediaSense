@@ -35,6 +35,7 @@ class PediaSenseApp extends StatelessWidget {
         '/setup': (context) => const CaregiverSetupScreen(),
         '/device': (context) => const DeviceConnectionScreen(),
         '/home': (context) => const MainShell(),
+        '/home_sim': (context) => const MainShell(simulated: true),
       },
     );
   }
@@ -45,7 +46,7 @@ class PediaSenseApp extends StatelessWidget {
 /// Flow:
 ///   1. If NOT logged in → /login
 ///   2. If logged in but NO baby profile → /setup
-///   3. If logged in AND has profile → /home
+///   3. If logged in AND has profile → /device (BLE connection screen)
 class SplashGate extends StatefulWidget {
   const SplashGate({super.key});
 
@@ -85,8 +86,8 @@ class _SplashGateState extends State<SplashGate> {
     if (!mounted) return;
 
     if (cachedProfile != null) {
-      // Profile cached locally → go to dashboard
-      Navigator.pushReplacementNamed(context, '/home');
+      // Profile cached locally → go to BLE connection screen
+      Navigator.pushReplacementNamed(context, '/device');
     } else {
       // No local cache → go to setup
       // Setup screen will do full Supabase check to determine if truly needs form or should bypass
