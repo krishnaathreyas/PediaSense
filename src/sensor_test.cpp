@@ -1,203 +1,281 @@
-#include "mic.h"
+#include <Arduino.h>
+#include <Wire.h>
 #include <driver/i2s.h>
 
-// ── Hardware wiring (confirmed from schematic) ────────────────────
-// L/R pin MUST be tied to GND (selects the left I2S channel).
-#define I2S_SCK_PIN    14
-#define I2S_WS_PIN     15
-#define I2S_SD_PIN     32
-#define I2S_PORT       I2S_NUM_0
-#define SAMPLE_RATE    16000
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include "DHT.h"
 
-// Active threshold: quiet room ≈ 200, normal speech ≈ 3000+
-#define MIC_ACTIVE_THRESHOLD  400.0f
+// ======================================================
+// Pins / wiring (ESP32 DevKit)
+// ======================================================
+// I2C (MPU6050): SDA=21, SCL=22
+// DHT11: DATA=GPIO4
+// INMP441 (I2S): WS/LRCLK=25, SCK/BCLK=26, SD/DOUT=33
 
-// ── Shared ring-buffer (used by cry.cpp) ─────────────────────────
-int32_t mic_buf[MIC_BUF_SIZE] = {0};
-int     mic_buf_count = 0;
+static constexpr int I2C_SDA = 21;
+static constexpr int I2C_SCL = 22;
 
-static MicData  data = {0.f, 0, false, 0.f, false, false, CRY_NONE, 0, 0, false};
-static bool     ok   = false;
-static int32_t  raw32[MIC_BUF_SIZE];
+static constexpr int DHTPIN = 4;
+static constexpr uint8_t DHTTYPE = DHT11;
 
-// ── HPF filter state (α=0.88 → ~300 Hz @ 16 kHz) ─────────────────
-static float hpf_in = 0.f, hpf_out = 0.f;
+static constexpr int I2S_WS = 25;
+static constexpr int I2S_SCK = 26;
+static constexpr int I2S_SD = 33;
 
-// ── Breathing rate state ──────────────────────────────────────────
-// Two-speed envelope tracks signal level:
-//   fast (α=0.20, τ≈0.3 s)  — follows breath amplitude swells
-//   slow (α=0.003, τ≈20 s)  — tracks quiet-room baseline
-static float     br_fast  = 0.f;
-static float     br_slow  = 200.f;
-static bool      br_high  = false;       // are we currently above threshold?
-static const int BR_ZC_MAX = 16;
-static unsigned long br_times[BR_ZC_MAX] = {0};
-static int       br_zc_head = 0, br_zc_count = 0;
+// ======================================================
+// Sensors
+// ======================================================
 
-// ── Cry event log ─────────────────────────────────────────────────
-static const int CRY_LOG = 20;
-static unsigned long cry_starts[CRY_LOG] = {0};
-static int cry_log_head = 0, cry_log_count = 0;
-static bool     in_cry    = false;
-static unsigned long cry_onset_ms = 0;
-#define CRY_MIN_DUR_MS  300UL    // ignore blips shorter than 300 ms
-#define CRY_WINDOW_MS   300000UL // 5 minutes
+static DHT dht(DHTPIN, DHTTYPE);
+static Adafruit_MPU6050 mpu;
+static bool gHasMpu = false;
 
-bool mic_init() {
-    i2s_config_t cfg = {
-        .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-        .sample_rate          = SAMPLE_RATE,
-        .bits_per_sample      = I2S_BITS_PER_SAMPLE_32BIT,
-        .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
-        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-        .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count        = 8,
-        .dma_buf_len          = 128,   // 128 × 8 = 1024 total I2S frames buffered
-        .use_apll             = false,
-        .tx_desc_auto_clear   = false,
-        .fixed_mclk           = 0
-    };
-    i2s_pin_config_t pins = {
-        .bck_io_num   = I2S_SCK_PIN,
-        .ws_io_num    = I2S_WS_PIN,
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num  = I2S_SD_PIN
-    };
-    if (i2s_driver_install(I2S_PORT, &cfg, 0, NULL) != ESP_OK) return false;
-    if (i2s_set_pin(I2S_PORT, &pins)                != ESP_OK) return false;
-    i2s_zero_dma_buffer(I2S_PORT);
-    ok = true;
-    return true;
+static bool i2cPing(uint8_t address) {
+  Wire.beginTransmission(address);
+  return Wire.endTransmission() == 0;
 }
 
-void mic_update() {
-    if (!ok) return;
-
-    size_t bytesRead = 0;
-    // Non-blocking: 0 ms timeout — returns whatever is in the DMA buffer now.
-    // This keeps the 50 Hz main loop on schedule.
-    i2s_read(I2S_PORT, raw32, sizeof(raw32), &bytesRead, 0);
-    int count = (int)(bytesRead / sizeof(int32_t));
-    if (count < 2) return;
-
-    // ── Deinterleave L/R, pick active channel ────────────────────
-    // The INMP441 outputs audio on one channel; the other is 0.
-    // Comparing |L| vs |R| handles the case where L/R is miswired.
-    float  total_e = 0.f, hpf_e = 0.f;
-    float  prev_in  = hpf_in, prev_out = hpf_out;
-    int32_t peak    = 0;
-    int     out     = 0;
-
-    for (int i = 0; i + 1 < count && out < MIC_BUF_SIZE; i += 2) {
-        int32_t L = raw32[i]   >> 8;   // 24-bit signed
-        int32_t R = raw32[i+1] >> 8;
-        int32_t v = (abs(L) >= abs(R)) ? L : R;   // active channel
-
-        // Write to shared ring-buffer (for cry.cpp)
-        mic_buf[out++] = v;
-
-        float x = float(v);
-
-        // ── HPF: y[n] = α × (y[n-1] + x[n] − x[n-1]) ──────────
-        float y   = 0.88f * (prev_out + x - prev_in);
-        prev_in   = x;
-        prev_out  = y;
-        total_e  += x * x;
-        hpf_e    += y * y;
-
-        int32_t a = abs(v);
-        if (a > peak) peak = a;
+static void scanI2CBus() {
+  Serial.println("I2C Scan: starting...");
+  int found = 0;
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    if (i2cPing(addr)) {
+      Serial.print("I2C device found at 0x");
+      if (addr < 16) Serial.print('0');
+      Serial.println(addr, HEX);
+      found++;
     }
-    hpf_in  = prev_in;
-    hpf_out = prev_out;
-    mic_buf_count = out;
-    if (out == 0) return;
-
-    float rms       = sqrtf(total_e / out);
-    float hpf_ratio = (total_e > 1.f) ? (hpf_e / total_e) : 0.f;
-
-    data.rms    = rms;
-    data.peak   = peak;
-    data.active = (rms > MIC_ACTIVE_THRESHOLD);
-
-    unsigned long now = millis();
-
-    // ════════════════════════════════════════════════════════════
-    //  BREATHING RATE — envelope peak detection
-    // ════════════════════════════════════════════════════════════
-    // Each RMS value is a point on the amplitude envelope.
-    // A breath (even quiet) causes a small swell above the ambient baseline.
-    br_fast = br_fast * 0.80f + rms * 0.20f;     // fast envelope (τ ≈ 0.3 s)
-    br_slow = br_slow * 0.997f + rms * 0.003f;   // slow baseline (τ ≈ 20 s)
-    float thr  = br_slow * 1.40f;                // 40% above baseline = breath
-    bool  high = (br_fast > thr);
-
-    if (high && !br_high) {
-        // Rising edge — mark a breath onset
-        br_times[br_zc_head] = now;
-        br_zc_head = (br_zc_head + 1) % BR_ZC_MAX;
-        if (br_zc_count < BR_ZC_MAX) br_zc_count++;
-    }
-    br_high = high;
-
-    if (br_zc_count >= 4) {
-        unsigned long newest = br_times[(br_zc_head + BR_ZC_MAX - 1) % BR_ZC_MAX];
-        unsigned long oldest = br_times[(br_zc_head + BR_ZC_MAX - br_zc_count) % BR_ZC_MAX];
-        unsigned long span   = newest - oldest;
-        if (span > 0) {
-            float rate = float(br_zc_count - 1) / (span / 60000.f);
-            if (rate >= 8.f && rate <= 100.f) {
-                data.breath_rate_bpm = rate;
-                data.breath_valid    = true;
-            }
-        }
-    } else {
-        data.breath_valid = false;
-    }
-
-    // ════════════════════════════════════════════════════════════
-    //  CRY DETECTION & CLASSIFICATION
-    // ════════════════════════════════════════════════════════════
-    // A cry is detected when:
-    //   • absolute level > 500 RMS (not just room noise)
-    //   • HPF band energy ratio > 0.28 (energy concentrated in high freqs)
-    bool detected = (rms > 500.f && hpf_ratio > 0.28f);
-
-    if (detected && !in_cry) {
-        in_cry       = true;
-        cry_onset_ms = now;
-    } else if (!detected && in_cry) {
-        if ((now - cry_onset_ms) >= CRY_MIN_DUR_MS) {
-            cry_starts[cry_log_head] = cry_onset_ms;
-            cry_log_head  = (cry_log_head + 1) % CRY_LOG;
-            if (cry_log_count < CRY_LOG) cry_log_count++;
-        }
-        in_cry = false;
-    }
-    data.crying = in_cry;
-
-    // Normalise strength 0–100 (clip at 5000 RMS = loud cry)
-    data.cry_strength = (uint8_t)min(100.f, rms / 50.f);
-
-    // Count recent cries
-    int recent = 0;
-    for (int i = 0; i < cry_log_count; i++) {
-        if ((now - cry_starts[i]) < CRY_WINDOW_MS) recent++;
-    }
-    if (in_cry) recent++;
-    data.cries_per_5min  = (uint8_t)min(recent, 255);
-    data.cry_persistent  = (data.cries_per_5min >= 3);
-
-    // Classify
-    if (!detected) {
-        data.cry_type = CRY_NONE;
-    } else if (rms >= 4000.f || hpf_ratio > 0.65f || data.cry_persistent) {
-        data.cry_type = CRY_DISTRESS;
-    } else if (rms < 800.f) {
-        data.cry_type = CRY_WEAK;
-    } else {
-        data.cry_type = CRY_NORMAL;
-    }
+    delay(2);
+  }
+  if (found == 0) {
+    Serial.println("I2C Scan: no devices found (check SDA=21, SCL=22, GND, power)");
+  } else {
+    Serial.print("I2C Scan: total devices found: ");
+    Serial.println(found);
+  }
 }
 
-const MicData& mic_get() { return data; }
+// ======================================================
+// INMP441 (I2S)
+// ======================================================
+
+static constexpr i2s_port_t I2S_PORT = I2S_NUM_0;
+static constexpr size_t kI2sBufferLen = 256; // int32 samples (interleaved L/R)
+static int32_t sBuffer[kI2sBufferLen];
+
+static void setupMic()
+{
+  i2s_config_t i2s_config = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+    .sample_rate = 16000,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
+    // Many I2S mics (e.g., INMP441) output on either Left or Right depending on L/R pin wiring.
+    // Read both channels and choose the one with signal.
+    .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 8,
+    .dma_buf_len = 64,
+    .use_apll = false,
+    .tx_desc_auto_clear = false,
+    .fixed_mclk = 0
+  };
+
+  i2s_pin_config_t pin_config = {
+    .bck_io_num = I2S_SCK,
+    .ws_io_num = I2S_WS,
+    .data_out_num = I2S_PIN_NO_CHANGE,
+    .data_in_num = I2S_SD
+  };
+
+  i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
+  i2s_set_pin(I2S_PORT, &pin_config);
+  i2s_zero_dma_buffer(I2S_PORT);
+}
+
+static int16_t i2s32To16(int32_t raw32)
+{
+  // INMP441: 24-bit signed sample MSB-aligned in a 32-bit frame.
+  // Keep the top 16 bits of the 24-bit sample.
+  const int32_t sample24 = raw32 >> 8;
+  return (int16_t)(sample24 >> 8);
+}
+
+static void readMicStats(int16_t& outRms, int16_t& outPeak)
+{
+  size_t bytesIn = 0;
+  const esp_err_t err = i2s_read(
+    I2S_PORT,
+    sBuffer,
+    sizeof(sBuffer),
+    &bytesIn,
+    portMAX_DELAY
+  );
+
+  if (err != ESP_OK || bytesIn < 2 * sizeof(int32_t)) {
+    outRms = 0;
+    outPeak = 0;
+    return;
+  }
+
+  const size_t samples = bytesIn / sizeof(int32_t);
+  int64_t sumSqL = 0;
+  int64_t sumSqR = 0;
+  int32_t peakL = 0;
+  int32_t peakR = 0;
+  size_t frames = 0;
+
+  for (size_t i = 0; i + 1 < samples; i += 2) {
+    const int16_t l = i2s32To16(sBuffer[i]);
+    const int16_t r = i2s32To16(sBuffer[i + 1]);
+
+    const int32_t al = abs((int)l);
+    const int32_t ar = abs((int)r);
+
+    sumSqL += (int64_t)al * (int64_t)al;
+    sumSqR += (int64_t)ar * (int64_t)ar;
+
+    if (al > peakL) peakL = al;
+    if (ar > peakR) peakR = ar;
+    frames++;
+  }
+
+  if (frames == 0) {
+    outRms = 0;
+    outPeak = 0;
+    return;
+  }
+
+  // Choose the channel with higher RMS (INMP441 L/R pin decides which actually carries signal).
+  const double rmsL = sqrt((double)sumSqL / (double)frames);
+  const double rmsR = sqrt((double)sumSqR / (double)frames);
+
+  if (rmsL >= rmsR) {
+    outRms = (int16_t)min(32767.0, rmsL);
+    outPeak = (int16_t)min(32767, peakL);
+  } else {
+    outRms = (int16_t)min(32767.0, rmsR);
+    outPeak = (int16_t)min(32767, peakR);
+  }
+}
+
+// ======================================================
+// SETUP
+// ======================================================
+
+void setup()
+{
+  Serial.begin(115200);
+
+  // I2C
+  Wire.begin(I2C_SDA, I2C_SCL);
+
+  delay(50);
+  scanI2CBus();
+
+  gHasMpu = mpu.begin(0x68, &Wire);
+  Serial.print("MPU6050 present: ");
+  Serial.println(gHasMpu ? "YES" : "NO");
+
+  if (gHasMpu) {
+    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+    Serial.println("MPU6050 Ready");
+  }
+
+  // ================= DHT11 =================
+
+  dht.begin();
+  Serial.println("DHT11 Ready");
+
+  // ================= MEMS MIC =================
+
+  setupMic();
+  Serial.println("MEMS MIC Ready");
+
+  Serial.println("Streaming JSON lines at 2Hz...");
+}
+
+// ======================================================
+// LOOP
+// ======================================================
+
+void loop()
+{
+  // ================= MPU6050 =================
+  float ax = 0, ay = 0, az = 0;
+  float gx = 0, gy = 0, gz = 0;
+  if (gHasMpu) {
+    sensors_event_t accel;
+    sensors_event_t gyro;
+    sensors_event_t temp;
+    mpu.getEvent(&accel, &gyro, &temp);
+    ax = accel.acceleration.x;
+    ay = accel.acceleration.y;
+    az = accel.acceleration.z;
+    gx = gyro.gyro.x;
+    gy = gyro.gyro.y;
+    gz = gyro.gyro.z;
+  }
+
+  // ================= DHT11 =================
+  static unsigned long lastDhtMs = 0;
+  static float lastTempC = NAN;
+  static float lastHumPct = NAN;
+  const unsigned long nowMs = millis();
+  if (nowMs - lastDhtMs >= 2000) {
+    lastTempC = dht.readTemperature();
+    lastHumPct = dht.readHumidity();
+    lastDhtMs = nowMs;
+  }
+  const float temperatureC = lastTempC;
+  const float humidityPct = lastHumPct;
+
+  // ================= INMP441 =================
+  int16_t micRms = 0;
+  int16_t micPeak = 0;
+  readMicStats(micRms, micPeak);
+
+  // ================= SERIAL OUTPUT =================
+  // One JSON object per line (easy to parse/display)
+  char json[256];
+  const unsigned long ms = nowMs;
+
+  const bool hasTemp = !isnan(temperatureC);
+  const bool hasHum = !isnan(humidityPct);
+
+  char tempBuf[16];
+  char humBuf[16];
+  if (hasTemp) {
+    snprintf(tempBuf, sizeof(tempBuf), "%.2f", temperatureC);
+  } else {
+    strncpy(tempBuf, "null", sizeof(tempBuf));
+    tempBuf[sizeof(tempBuf) - 1] = '\0';
+  }
+  if (hasHum) {
+    snprintf(humBuf, sizeof(humBuf), "%.2f", humidityPct);
+  } else {
+    strncpy(humBuf, "null", sizeof(humBuf));
+    humBuf[sizeof(humBuf) - 1] = '\0';
+  }
+
+  // NOTE: DHT11 updates slowly; reading faster than ~1Hz can return NaN.
+  snprintf(
+    json,
+    sizeof(json),
+    "{\"t_ms\":%lu,\"mpu_ok\":%s,\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,\"gx\":%.3f,\"gy\":%.3f,\"gz\":%.3f,\"temp_c\":%s,\"hum\":%s,\"mic_rms\":%d,\"mic_peak\":%d}",
+    ms,
+    gHasMpu ? "true" : "false",
+    ax, ay, az,
+    gx, gy, gz,
+    tempBuf,
+    humBuf,
+    (int)micRms,
+    (int)micPeak
+  );
+  Serial.println(json);
+
+  delay(500);
+}

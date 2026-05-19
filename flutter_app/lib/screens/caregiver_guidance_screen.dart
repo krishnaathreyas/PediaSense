@@ -50,11 +50,13 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
     super.initState();
 
     // Add welcome message
-    _messages.add(ChatMessage(
-      type: MessageType.system,
-      content:
-          'Welcome to PediaSense Guidance. I provide evidence-based advice from WHO IMCI & IAP guidelines.\n\nChat will activate when vitals need attention.',
-    ));
+    _messages.add(
+      ChatMessage(
+        type: MessageType.system,
+        content:
+            'Welcome to PediaSense Guidance. I provide evidence-based advice from WHO IMCI & IAP guidelines.\n\nChat will activate when vitals need attention.',
+      ),
+    );
 
     // Listen for RAG suggestions (auto-triggered from dashboard vitals)
     _ragSub = RagService.instance.suggestionStream.listen(_onAutoSuggestion);
@@ -75,21 +77,25 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
 
     setState(() {
       // Add system alert about vitals
-      _messages.add(ChatMessage(
-        type: MessageType.system,
-        content:
-            '⚠️ Vitals alert detected — ${suggestion.severity.toUpperCase()} level. Analyzing against WHO & IAP guidelines...',
-      ));
+      _messages.add(
+        ChatMessage(
+          type: MessageType.system,
+          content:
+              '⚠️ Vitals alert detected — ${suggestion.severity.toUpperCase()} level. Analyzing against WHO & IAP guidelines...',
+        ),
+      );
 
       // Remove any existing loading message
       _messages.removeWhere((m) => m.isLoading);
 
       // Add the RAG response as an assistant message
-      _messages.add(ChatMessage(
-        type: MessageType.assistant,
-        content: _formatSuggestionAsChat(suggestion),
-        ragData: suggestion,
-      ));
+      _messages.add(
+        ChatMessage(
+          type: MessageType.assistant,
+          content: _formatSuggestionAsChat(suggestion),
+          ragData: suggestion,
+        ),
+      );
 
       _chatEnabled = true;
       _hasReceivedAutoSuggestion = true;
@@ -123,10 +129,7 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
   Future<void> _sendMessage(String text) async {
     if (text.trim().isEmpty || _isSending) return;
 
-    final userMsg = ChatMessage(
-      type: MessageType.user,
-      content: text.trim(),
-    );
+    final userMsg = ChatMessage(type: MessageType.user, content: text.trim());
 
     final loadingMsg = ChatMessage(
       type: MessageType.assistant,
@@ -219,8 +222,10 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
               ? _buildEmptyState()
               : ListView.builder(
                   controller: _scrollController,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   itemCount: _messages.length,
                   itemBuilder: (context, index) =>
                       _buildMessage(_messages[index]),
@@ -263,7 +268,11 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
               ),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.auto_awesome, color: Colors.white, size: 22),
+            child: const Icon(
+              Icons.auto_awesome,
+              color: Colors.white,
+              size: 22,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -294,8 +303,11 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
           ),
           // Emergency button
           IconButton(
-            icon: const Icon(Icons.local_hospital,
-                color: AppTheme.errorMain, size: 24),
+            icon: const Icon(
+              Icons.local_hospital,
+              color: AppTheme.errorMain,
+              size: 24,
+            ),
             tooltip: 'Emergency: 112',
             onPressed: () => _launchUrl('tel:112'),
           ),
@@ -313,8 +325,11 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.chat_bubble_outline,
-                size: 64, color: Colors.grey.shade300),
+            Icon(
+              Icons.chat_bubble_outline,
+              size: 64,
+              color: Colors.grey.shade300,
+            ),
             const SizedBox(height: 16),
             Text(
               'No messages yet',
@@ -357,8 +372,11 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline,
-              size: 16, color: AppTheme.infoMain.withValues(alpha: 0.7)),
+          Icon(
+            Icons.info_outline,
+            size: 16,
+            color: AppTheme.infoMain.withValues(alpha: 0.7),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -433,8 +451,11 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
               ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child:
-                const Icon(Icons.auto_awesome, color: Colors.white, size: 16),
+            child: const Icon(
+              Icons.auto_awesome,
+              color: Colors.white,
+              size: 16,
+            ),
           ),
           const SizedBox(width: 8),
 
@@ -450,8 +471,7 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
                   bottomLeft: Radius.circular(18),
                   bottomRight: Radius.circular(18),
                 ),
-                border:
-                    Border.all(color: severityColor.withValues(alpha: 0.2)),
+                border: Border.all(color: severityColor.withValues(alpha: 0.2)),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.04),
@@ -470,7 +490,9 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
                             color: severityColor,
                             borderRadius: BorderRadius.circular(6),
@@ -490,8 +512,11 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.verified,
-                                  size: 12, color: AppTheme.primaryMain),
+                              Icon(
+                                Icons.verified,
+                                size: 12,
+                                color: AppTheme.primaryMain,
+                              ),
                               const SizedBox(width: 3),
                               Text(
                                 '${suggestion.chunksUsed} sources',
@@ -512,8 +537,7 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
                   _buildRichText(msg.content),
 
                   // Source chips
-                  if (suggestion != null &&
-                      suggestion.sources.isNotEmpty) ...[
+                  if (suggestion != null && suggestion.sources.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     const Divider(height: 1),
                     const SizedBox(height: 8),
@@ -537,20 +561,28 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
                           borderRadius: BorderRadius.circular(6),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
-                              color:
-                                  AppTheme.primaryMain.withValues(alpha: 0.06),
+                              color: AppTheme.primaryMain.withValues(
+                                alpha: 0.06,
+                              ),
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
-                                  color: AppTheme.primaryMain
-                                      .withValues(alpha: 0.15)),
+                                color: AppTheme.primaryMain.withValues(
+                                  alpha: 0.15,
+                                ),
+                              ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.menu_book,
-                                    size: 11, color: AppTheme.primaryMain),
+                                Icon(
+                                  Icons.menu_book,
+                                  size: 11,
+                                  color: AppTheme.primaryMain,
+                                ),
                                 const SizedBox(width: 4),
                                 Flexible(
                                   child: Text(
@@ -574,10 +606,7 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
                   const SizedBox(height: 8),
                   Text(
                     _formatTime(msg.timestamp),
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey.shade400,
-                    ),
+                    style: TextStyle(fontSize: 10, color: Colors.grey.shade400),
                   ),
                 ],
               ),
@@ -596,30 +625,42 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
 
     for (final match in regex.allMatches(text)) {
       if (match.start > lastEnd) {
-        spans.add(TextSpan(
-          text: text.substring(lastEnd, match.start),
-          style: const TextStyle(
-              fontSize: 13, color: AppTheme.textPrimary, height: 1.5),
-        ));
+        spans.add(
+          TextSpan(
+            text: text.substring(lastEnd, match.start),
+            style: const TextStyle(
+              fontSize: 13,
+              color: AppTheme.textPrimary,
+              height: 1.5,
+            ),
+          ),
+        );
       }
-      spans.add(TextSpan(
-        text: match.group(1),
-        style: const TextStyle(
-          fontSize: 13,
-          color: AppTheme.textPrimary,
-          fontWeight: FontWeight.w600,
-          height: 1.5,
+      spans.add(
+        TextSpan(
+          text: match.group(1),
+          style: const TextStyle(
+            fontSize: 13,
+            color: AppTheme.textPrimary,
+            fontWeight: FontWeight.w600,
+            height: 1.5,
+          ),
         ),
-      ));
+      );
       lastEnd = match.end;
     }
 
     if (lastEnd < text.length) {
-      spans.add(TextSpan(
-        text: text.substring(lastEnd),
-        style: const TextStyle(
-            fontSize: 13, color: AppTheme.textPrimary, height: 1.5),
-      ));
+      spans.add(
+        TextSpan(
+          text: text.substring(lastEnd),
+          style: const TextStyle(
+            fontSize: 13,
+            color: AppTheme.textPrimary,
+            height: 1.5,
+          ),
+        ),
+      );
     }
 
     return RichText(text: TextSpan(children: spans));
@@ -641,8 +682,11 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
               ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child:
-                const Icon(Icons.auto_awesome, color: Colors.white, size: 16),
+            child: const Icon(
+              Icons.auto_awesome,
+              color: Colors.white,
+              size: 16,
+            ),
           ),
           const SizedBox(width: 8),
           Container(
@@ -656,7 +700,8 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
                 bottomRight: Radius.circular(18),
               ),
               border: Border.all(
-                  color: AppTheme.primaryMain.withValues(alpha: 0.15)),
+                color: AppTheme.primaryMain.withValues(alpha: 0.15),
+              ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -706,7 +751,8 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
               onPressed: () => _sendMessage(_quickActions[index]),
               backgroundColor: AppTheme.primaryMain.withValues(alpha: 0.06),
               side: BorderSide(
-                  color: AppTheme.primaryMain.withValues(alpha: 0.2)),
+                color: AppTheme.primaryMain.withValues(alpha: 0.2),
+              ),
               padding: const EdgeInsets.symmetric(horizontal: 4),
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               visualDensity: VisualDensity.compact,
@@ -722,7 +768,11 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
   Widget _buildInputBar() {
     return Container(
       padding: EdgeInsets.fromLTRB(
-          12, 8, 12, MediaQuery.of(context).padding.bottom + 8),
+        12,
+        8,
+        12,
+        MediaQuery.of(context).padding.bottom + 8,
+      ),
       decoration: BoxDecoration(
         color: AppTheme.backgroundPaper,
         boxShadow: [
@@ -765,7 +815,9 @@ class _CaregiverGuidanceScreenState extends State<CaregiverGuidanceScreen>
                   ),
                   border: InputBorder.none,
                   contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 18, vertical: 10),
+                    horizontal: 18,
+                    vertical: 10,
+                  ),
                   isDense: true,
                 ),
                 textInputAction: TextInputAction.send,

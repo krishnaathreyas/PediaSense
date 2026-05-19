@@ -209,6 +209,9 @@ gtk_IS_TOP_LEVEL:STATIC=OFF
 //Value Computed by CMake
 gtk_SOURCE_DIR:STATIC=/Users/apple/Documents/PlatformIO/Projects/PediaSense/flutter_app/linux/flutter/ephemeral/.plugin_symlinks/gtk/linux
 
+//Dependencies for the target
+gtk_plugin_LIB_DEPENDS:STATIC=general;flutter;
+
 //Value Computed by CMake
 runner_BINARY_DIR:STATIC=/Users/apple/Documents/PlatformIO/Projects/PediaSense/build/runner
 

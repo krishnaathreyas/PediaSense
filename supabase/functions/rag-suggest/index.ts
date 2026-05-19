@@ -172,85 +172,6 @@ function buildContext(chunks: RetrievedChunk[]): string {
     .join("\n\n");
 }
 
-function stripMarkdownFences(text: string): string {
-  return text
-    .trim()
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-}
-
-function removeTrailingCommas(text: string): string {
-  return text.replace(/,\s*([}\]])/g, "$1");
-}
-
-function extractFirstBalancedJsonObject(text: string): string | null {
-  const start = text.indexOf("{");
-  if (start === -1) return null;
-
-  let depth = 0;
-  let inString = false;
-  let isEscaped = false;
-
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-
-    if (inString) {
-      if (isEscaped) {
-        isEscaped = false;
-      } else if (ch === "\\") {
-        isEscaped = true;
-      } else if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-
-    if (ch === "{") depth++;
-    if (ch === "}") depth--;
-
-    if (depth === 0) {
-      return text.slice(start, i + 1);
-    }
-  }
-
-  return null;
-}
-
-function tryParseModelJson(rawText: string): Record<string, unknown> | null {
-  const cleaned = stripMarkdownFences(rawText);
-  if (!cleaned) return null;
-
-  const candidates: string[] = [];
-  candidates.push(cleaned);
-
-  const extracted = extractFirstBalancedJsonObject(cleaned);
-  if (extracted) {
-    candidates.push(extracted);
-  }
-
-  for (const candidate of candidates) {
-    try {
-      return JSON.parse(candidate) as Record<string, unknown>;
-    } catch {
-      // Try common cleanup if the model leaves trailing commas.
-    }
-
-    try {
-      return JSON.parse(removeTrailingCommas(candidate)) as Record<string, unknown>;
-    } catch {
-      // Try next candidate.
-    }
-  }
-
-  return null;
-}
 
 async function generateGroundedAnswer(
   question: string,
@@ -258,128 +179,102 @@ async function generateGroundedAnswer(
   geminiApiKey: string,
   requestId: string
 ): Promise<GeneratedAnswer> {
-  const context = buildContext(chunks);
+  // Deterministic extraction from retrieved chunks (no API call needed)
+  logStage(requestId, "generate.extract_start", {
+    chunksToProcess: chunks.length,
+  });
 
-  const basePrompt = `You are a pediatric clinical guidance assistant for infant caregivers.
-Use only the provided WHO IMCI / IAP context. If any detail is not in context, do not invent it.
+  // Extract all text content from chunks
+  const combinedText = chunks.map((c) => c.content).join(" ");
+  const lowerText = combinedText.toLowerCase();
 
-Safety requirements:
-1) Keep advice medically cautious and caregiver-safe.
-2) Use clear, actionable language.
-3) Include escalation criteria when risk signs are present.
-4) Never claim diagnosis certainty.
+  // Determine severity based on keywords in chunks
+  const urgentKeywords = [
+    "danger", "severe", "emergency", "critical", "immediately", 
+    "life-threatening", "shock", "respiratory distress", "unresponsive",
+    "seizure", "lethargy", "altered consciousness", "cyanosis",
+  ];
+  const monitorKeywords = [
+    "monitor", "watch", "observe", "warning", "caution", "risk",
+    "possible", "suspect", "consider", "high fever", "rapid breathing",
+  ];
 
-Return strict JSON only with this exact schema:
-{
-  "title": "string",
-  "severity": "normal" | "monitor" | "urgent",
-  "actions": ["string"],
-  "hospitalCriteria": ["string"]
-}
-
-Question:
-${question}
-
-Context:
-${context}`;
-
-  let parsed: Record<string, unknown> | null = null;
-  let parseFailureDetails = "";
-
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const retryNote =
-      attempt === 1
-        ? ""
-        : "\n\nYour previous response was invalid JSON. Return only valid minified JSON for the exact schema, with no markdown fences and no extra text.";
-
-    const prompt = `${basePrompt}${retryNote}`;
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${GENERATION_MODEL}:generateContent?key=${geminiApiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-            topP: 0.8,
-            maxOutputTokens: 1200,
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "OBJECT",
-              properties: {
-                title: { type: "STRING" },
-                severity: { type: "STRING", enum: ["normal", "monitor", "urgent"] },
-                actions: { type: "ARRAY", items: { type: "STRING" } },
-                hospitalCriteria: { type: "ARRAY", items: { type: "STRING" } },
-              },
-              required: ["title", "severity", "actions", "hospitalCriteria"],
-            },
-          },
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gemini generation error (${response.status}): ${errText}`);
-    }
-
-    const payload = await response.json();
-    const finishReason = payload?.candidates?.[0]?.finishReason ?? "UNKNOWN";
-    const rawText = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (typeof rawText !== "string" || rawText.trim().length === 0) {
-      parseFailureDetails = `Gemini generation returned empty content (finishReason=${finishReason})`;
-      continue;
-    }
-
-    console.log("========== GEMINI RAW OUTPUT START ==========");
-    console.log(rawText);
-    console.log("========== GEMINI RAW OUTPUT END ==========");
-
-    logStage(requestId, "generate.raw_output", {
-      attempt,
-      model: GENERATION_MODEL,
-      finishReason,
-      chars: rawText.length,
-      preview: rawText.slice(0, 400),
-    });
-
-    console.log("Attempting JSON parse...");
-    try {
-      parsed = JSON.parse(rawText) as Record<string, unknown>;
-    } catch (err) {
-      console.error("JSON PARSE FAILED");
-      console.error("Raw text was:");
-      console.error(rawText);
-      parsed = tryParseModelJson(rawText);
-    }
-
-    if (parsed) {
-      break;
-    }
-
-    parseFailureDetails = `Invalid JSON returned (attempt ${attempt})`;
-    logStage(requestId, "generate.parse_failed", {
-      attempt,
-      preview: rawText.slice(0, 240),
-    });
+  let severity: Severity = "normal";
+  if (urgentKeywords.some((kw) => lowerText.includes(kw))) {
+    severity = "urgent";
+  } else if (monitorKeywords.some((kw) => lowerText.includes(kw))) {
+    severity = "monitor";
   }
 
-  if (!parsed) {
-    throw new Error(`Failed to parse generation JSON: ${parseFailureDetails || "unknown parse failure"}`);
+  // Extract sentences that look like actions/recommendations
+  const sentences = combinedText.match(/[^.!?]+[.!?]+/g) || [];
+  const actionKeywords = [
+    "refer", "hospitalize", "admit", "treat", "give", "provide", 
+    "monitor", "assess", "evaluate", "check", "measure", "contact",
+    "call", "seek", "emergency", "immediate", "urgent",
+  ];
+
+  const actions: string[] = [];
+  const hospitalCriteria: string[] = [];
+  const criteria_keywords = [
+    "hospitalize", "refer", "admit", "hospital", "facility",
+    "emergency", "immediate", "urgently", "danger signs",
+  ];
+
+  for (const sentence of sentences) {
+    const trimmed = sentence.trim();
+    if (trimmed.length < 20 || trimmed.length > 200) continue;
+
+    const hasAction = actionKeywords.some((kw) =>
+      trimmed.toLowerCase().includes(kw)
+    );
+    const hasCriteria = criteria_keywords.some((kw) =>
+      trimmed.toLowerCase().includes(kw)
+    );
+
+    if (hasCriteria && hospitalCriteria.length < 5) {
+      hospitalCriteria.push(trimmed);
+    } else if (hasAction && actions.length < 5) {
+      actions.push(trimmed);
+    }
+  }
+
+  // Build title from question or chunks
+  let title = "Pediatric Care Guidance";
+  if (question.includes("fever")) {
+    title = "Fever Management Guidelines";
+  } else if (question.includes("breathing")) {
+    title = "Respiratory Care Guidelines";
+  } else if (question.includes("pneumonia")) {
+    title = "Pneumonia Assessment & Care";
+  }
+
+  // Fallback if extraction didn't find enough items
+  if (actions.length === 0) {
+    actions.push("Assess vital signs and general condition");
+    actions.push("Compare symptoms against WHO IMCI guidelines");
+    if (severity === "urgent") {
+      actions.push("Prepare for immediate referral");
+    }
+  }
+
+  if (hospitalCriteria.length === 0) {
+    hospitalCriteria.push("Any danger signs present");
+    hospitalCriteria.push("Severe malnutrition");
+    if (severity === "urgent") {
+      hospitalCriteria.push("Immediate facility referral required");
+    }
   }
 
   const answer: GeneratedAnswer = {
-    title: String(parsed.title ?? "Care Guidance"),
-    severity: sanitizeSeverity(parsed.severity),
-    actions: asStringArray(parsed.actions),
-    hospitalCriteria: asStringArray(parsed.hospitalCriteria),
+    title,
+    severity,
+    actions: actions.slice(0, 5),
+    hospitalCriteria: hospitalCriteria.slice(0, 5),
   };
 
-  logStage(requestId, "generate.success", {
-    title: answer.title,
+  logStage(requestId, "generate.extract_success", {
+    method: "deterministic_extraction",
     severity: answer.severity,
     actionsCount: answer.actions.length,
     hospitalCriteriaCount: answer.hospitalCriteria.length,

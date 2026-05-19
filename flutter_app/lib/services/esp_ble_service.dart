@@ -1,11 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../models/vitals_data.dart';
 
 class EspBleService {
+  EspBleService._internal();
+  static final EspBleService instance = EspBleService._internal();
+  factory EspBleService() => instance;
+
   static final Guid serviceUuid = Guid('12345678-1234-1234-1234-1234567890ab');
   static final Guid dataUuid = Guid('abcd1234-5678-1234-5678-abcdef123456');
 
@@ -34,7 +40,24 @@ class EspBleService {
   final List<StreamSubscription<List<int>>> _notifySubs = [];
   Timer? _publishTimer;
 
+  Future<void> _ensureBlePermissions() async {
+    if (!Platform.isAndroid) return;
+
+    // Android requires runtime permissions for BLE scan/connect on most versions.
+    final statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+    ].request();
+
+    final granted = statuses.values.every((s) => s.isGranted || s.isLimited);
+    if (!granted) {
+      throw Exception('Bluetooth permissions not granted');
+    }
+  }
+
   Future<void> start() async {
+    await _ensureBlePermissions();
     await FlutterBluePlus.stopScan();
 
     _publishTimer?.cancel();
@@ -72,6 +95,7 @@ class EspBleService {
   Future<void> scanNearby({
     Duration timeout = const Duration(seconds: 10),
   }) async {
+    await _ensureBlePermissions();
     await FlutterBluePlus.stopScan();
     await _scanSub?.cancel();
 
@@ -86,6 +110,7 @@ class EspBleService {
   }
 
   Future<void> connectToScanResult(ScanResult result) async {
+    await _ensureBlePermissions();
     await FlutterBluePlus.stopScan();
     await _connect(result.device);
   }
@@ -128,7 +153,11 @@ class EspBleService {
     if (uuid != dataUuid || bytes.isEmpty) return;
 
     try {
-      final text = utf8.decode(bytes, allowMalformed: true);
+      final text = utf8
+          .decode(bytes, allowMalformed: true)
+          .replaceAll('\u0000', '')
+          .trim();
+      if (text.isEmpty) return;
       final json = jsonDecode(text) as Map<String, dynamic>;
 
       final hr = (json['hr'] as num?)?.toDouble() ?? _latest.heartRate;
@@ -149,11 +178,12 @@ class EspBleService {
         skinTemp: skinTemp,
         riskLevel: risk,
       );
+
+      // Push immediately on new valid sample (timer remains as a safety net).
+      _vitalsController.add(_latest);
     } catch (_) {
       // Ignore malformed packets and keep last valid sample.
     }
-
-    // UI stream is published every 5 seconds by _publishTimer.
   }
 
   Future<void> stop() async {
@@ -176,9 +206,7 @@ class EspBleService {
   }
 
   Future<void> dispose() async {
+    // Keep controllers open (singleton service reused across screens).
     await stop();
-    await _scanResultsController.close();
-    await _vitalsController.close();
-    await _connectedController.close();
   }
 }

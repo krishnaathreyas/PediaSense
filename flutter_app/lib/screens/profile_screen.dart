@@ -244,6 +244,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(
+                      Icons.bluetooth,
+                      color: AppTheme.primaryMain,
+                    ),
+                    title: const Text('Device Connection'),
+                    subtitle: const Text('Scan and connect to your ESP32'),
+                    onTap: () => Navigator.pushNamed(context, '/device'),
+                  ),
+                  const Divider(),
                   _settingsTile(
                     Icons.security,
                     'Privacy & Security',
