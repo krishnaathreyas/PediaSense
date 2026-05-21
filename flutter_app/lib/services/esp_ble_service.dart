@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -30,16 +31,14 @@ class EspBleService {
   static const String legacyNamePrefix = 'PediaSense';
 
   // ──────────────────────────────────────────────────────────────────────────
-  //  UUID placeholders (IMPORTANT: update to match your ESP32 firmware)
+  //  BLE UUIDs (MUST match ESP32 firmware exactly)
   // ──────────────────────────────────────────────────────────────────────────
   /// The primary GATT service that exposes sensor data.
-  /// TODO: Replace with your ESP32 service UUID.
-  static final Guid serviceUuid = Guid('12345678-1234-1234-1234-1234567890ab');
+  static final Guid serviceUuid = Guid('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
 
-  /// Characteristic that streams newline-delimited JSON sensor samples.
-  /// TODO: Replace with your ESP32 characteristic UUID.
+  /// Characteristic that streams JSON sensor samples via notify.
   static final Guid sensorDataUuid = Guid(
-    'abcd1234-5678-1234-5678-abcdef123456',
+    'beb5483e-36e1-4688-b7f5-ea07361b26a8',
   );
 
   /// Backwards-compatible alias (older code refers to `dataUuid`).
@@ -77,9 +76,8 @@ class EspBleService {
   Timer? _reconnectTimer;
 
   void _log(String msg) {
-    // Centralized logging so it can be swapped later.
-    // ignore: avoid_print
-    print('[EspBleService] $msg');
+    // Always print BLE debug logs for troubleshooting
+    debugPrint('[EspBleService] $msg');
   }
 
   Future<void> _ensureBlePermissions() async {
@@ -96,6 +94,7 @@ class EspBleService {
     if (!granted) {
       throw Exception('Bluetooth permissions not granted');
     }
+    _log('BLE permissions granted');
   }
 
   Future<void> start() async {
@@ -210,21 +209,27 @@ class EspBleService {
     await _connect(result.device);
   }
 
+  // ════════════════════════════════════════════════════════════════════════════
+  //  CONNECT + SERVICE DISCOVERY (core BLE handshake)
+  // ════════════════════════════════════════════════════════════════════════════
+
   Future<void> _connect(BluetoothDevice device) async {
     _device = device;
-
     _rxBuffer = '';
     _cancelNotifySubs();
     await _connectionSub?.cancel();
 
-    _log('Connecting to ${device.platformName} (${device.remoteId.str})');
+    _log('╔══════════════════════════════════════════════════╗');
+    _log('║  CONNECTING to ${device.platformName} (${device.remoteId.str})');
+    _log('╚══════════════════════════════════════════════════╝');
 
+    // Listen for connection state changes
     _connectionSub = device.connectionState.listen((state) {
       final connected = state == BluetoothConnectionState.connected;
       _connectedController.add(connected);
 
       if (!connected) {
-        _log('Disconnected');
+        _log('⚡ Disconnected from ${device.platformName}');
         _statusController.add(
           _shouldReconnect
               ? BleConnectionStatus.reconnecting
@@ -234,36 +239,143 @@ class EspBleService {
         if (_shouldReconnect) {
           _scheduleReconnect();
         }
-      } else {
-        _log('Connected');
-        _statusController.add(BleConnectionStatus.connected);
-        _reconnectAttempt = 0;
-        _reconnectTimer?.cancel();
       }
     });
 
-    await device.connect(autoConnect: false);
-    await device.requestMtu(185);
+    // ── Step 1: Connect ──
+    _log('Step 1: Calling device.connect()...');
+    await device.connect(autoConnect: false, timeout: const Duration(seconds: 15));
+    _log('Step 1: ✅ connect() completed');
 
-    final services = await device.discoverServices();
+    // ── Step 2: Request MTU ──
+    _log('Step 2: Requesting MTU 185...');
+    try {
+      final mtu = await device.requestMtu(185);
+      _log('Step 2: ✅ MTU negotiated: $mtu');
+    } catch (e) {
+      _log('Step 2: ⚠️ MTU request failed (non-fatal): $e');
+    }
+
+    // ── Step 3: Post-connect delay ──
+    // ESP32 BLE stack needs time to stabilise after connection
+    _log('Step 3: Waiting 1500ms for ESP32 BLE stack to stabilise...');
+    await Future.delayed(const Duration(milliseconds: 1500));
+
+    // ── Step 4: Discover services ──
+    _log('Step 4: Discovering services...');
+    List<BluetoothService> services;
+    try {
+      services = await device.discoverServices();
+    } catch (e) {
+      _log('Step 4: ⚠️ First discovery attempt failed: $e — retrying in 1s');
+      await Future.delayed(const Duration(seconds: 1));
+      services = await device.discoverServices();
+    }
+
+    _log('Step 4: ✅ Found ${services.length} service(s)');
+
+    // ── Step 5: Log ALL discovered services and characteristics ──
+    _log('┌─────────────────────────────────────────────────');
+    _log('│ DISCOVERED SERVICES');
+    _log('├─────────────────────────────────────────────────');
     for (final service in services) {
-      if (service.uuid != serviceUuid) continue;
-
+      _log('│ Service: ${service.uuid.str}');
       for (final ch in service.characteristics) {
-        if (ch.uuid == sensorDataUuid) {
-          await ch.setNotifyValue(true);
-          final sub = ch.onValueReceived.listen((bytes) {
-            _decodeAndPublish(ch.uuid, bytes);
-          });
-          _notifySubs.add(sub);
+        final props = <String>[];
+        if (ch.properties.read) props.add('READ');
+        if (ch.properties.write) props.add('WRITE');
+        if (ch.properties.notify) props.add('NOTIFY');
+        if (ch.properties.indicate) props.add('INDICATE');
+        _log('│   └─ Char: ${ch.uuid.str}  [${props.join(', ')}]');
+      }
+    }
+    _log('└─────────────────────────────────────────────────');
 
-          final current = await ch.read();
-          _decodeAndPublish(ch.uuid, current);
+    // ── Step 6: Find our target service and characteristic ──
+    BluetoothCharacteristic? vitalsChar;
+
+    final targetServiceStr = serviceUuid.str.toLowerCase();
+    final targetCharStr = sensorDataUuid.str.toLowerCase();
+
+    _log('Step 6: Looking for service=$targetServiceStr, char=$targetCharStr');
+
+    for (final service in services) {
+      if (service.uuid.str.toLowerCase() == targetServiceStr) {
+        _log('Step 6: ✅ Found PediaSense service!');
+        for (final ch in service.characteristics) {
+          if (ch.uuid.str.toLowerCase() == targetCharStr) {
+            _log('Step 6: ✅ Found vitals characteristic!');
+            vitalsChar = ch;
+            break;
+          }
         }
+        break;
       }
     }
 
-    _log('Service/characteristics discovery complete');
+    if (vitalsChar == null) {
+      _log('Step 6: ❌ VITALS CHARACTERISTIC NOT FOUND!');
+      _log('  Expected service UUID:  $targetServiceStr');
+      _log('  Expected char UUID:     $targetCharStr');
+      _log('  This means ESP32 is not exposing the expected GATT profile.');
+      // Still mark as connected so user can see the issue
+      _statusController.add(BleConnectionStatus.connected);
+      _reconnectAttempt = 0;
+      _reconnectTimer?.cancel();
+      return;
+    }
+
+    // ── Step 7: Enable notifications ──
+    _log('Step 7: Enabling notifications on vitals characteristic...');
+    try {
+      await vitalsChar.setNotifyValue(true);
+      _log('Step 7: ✅ setNotifyValue(true) succeeded');
+    } catch (e) {
+      _log('Step 7: ❌ setNotifyValue FAILED: $e');
+      _log('  Retrying after 500ms...');
+      await Future.delayed(const Duration(milliseconds: 500));
+      try {
+        await vitalsChar.setNotifyValue(true);
+        _log('Step 7: ✅ setNotifyValue(true) succeeded on retry');
+      } catch (e2) {
+        _log('Step 7: ❌❌ setNotifyValue FAILED on retry: $e2');
+        _statusController.add(BleConnectionStatus.connected);
+        return;
+      }
+    }
+
+    // ── Step 8: Subscribe to value stream ──
+    _log('Step 8: Subscribing to onValueReceived stream...');
+    final sub = vitalsChar.onValueReceived.listen((bytes) {
+      _log('📥 RAW BYTES received: length=${bytes.length}, bytes=$bytes');
+      _decodeAndPublish(vitalsChar!.uuid, bytes);
+    });
+    _notifySubs.add(sub);
+    _log('Step 8: ✅ Subscription active');
+
+    // ── Step 9: Try initial read (optional — may not be supported) ──
+    if (vitalsChar.properties.read) {
+      _log('Step 9: Attempting initial read()...');
+      try {
+        final current = await vitalsChar.read();
+        _log('Step 9: ✅ Initial read: $current');
+        if (current.isNotEmpty) {
+          _decodeAndPublish(vitalsChar.uuid, current);
+        }
+      } catch (e) {
+        _log('Step 9: ⚠️ Initial read failed (non-fatal): $e');
+      }
+    } else {
+      _log('Step 9: Skipping read — characteristic does not support READ');
+    }
+
+    // ── Done ──
+    _statusController.add(BleConnectionStatus.connected);
+    _reconnectAttempt = 0;
+    _reconnectTimer?.cancel();
+    _log('════════════════════════════════════════════════════');
+    _log('  BLE SETUP COMPLETE — waiting for notifications');
+    _log('════════════════════════════════════════════════════');
   }
 
   void _scheduleReconnect() {
@@ -286,16 +398,25 @@ class EspBleService {
     });
   }
 
-  void _decodeAndPublish(Guid uuid, List<int> bytes) {
-    if (uuid != sensorDataUuid || bytes.isEmpty) return;
+  // ════════════════════════════════════════════════════════════════════════════
+  //  DECODE + PUBLISH (BLE bytes → VitalsData)
+  // ════════════════════════════════════════════════════════════════════════════
 
-    // Note: payloads are small (~every 3 seconds) so we keep logging minimal.
+  void _decodeAndPublish(Guid uuid, List<int> bytes) {
+    if (bytes.isEmpty) {
+      _log('⚠️ Empty bytes received — skipping');
+      return;
+    }
 
     try {
+      // Decode raw bytes to UTF-8 string
       final chunk = utf8.decode(bytes, allowMalformed: true);
+      _log('📝 Decoded UTF-8: "$chunk"');
+
+      // Append to buffer (handle partial packets)
       _rxBuffer += chunk.replaceAll('\u0000', '');
 
-      // Preferred: newline-delimited JSON
+      // ── Strategy 1: Newline-delimited JSON ──
       while (true) {
         final idx = _rxBuffer.indexOf('\n');
         if (idx < 0) break;
@@ -305,32 +426,43 @@ class EspBleService {
         _handleJsonLine(line);
       }
 
-      // Fallback: single JSON object without newline
+      // ── Strategy 2: Single JSON object without newline ──
       final trimmed = _rxBuffer.trim();
       if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
         _handleJsonLine(trimmed);
         _rxBuffer = '';
       }
     } catch (e) {
-      _log('Decode error: $e');
+      _log('❌ Decode error: $e');
     }
   }
 
   void _handleJsonLine(String line) {
+    _log('🔍 Parsing JSON line: "$line"');
+
     try {
       final json = jsonDecode(line) as Map<String, dynamic>;
+      _log('✅ JSON parsed: keys=${json.keys.toList()}, values=$json');
 
-      // FINAL payload only: {hr, spo2, br, skin_temp}
+      // Parse into VitalsData
       final vitals = VitalsData.tryFromJsonMap(json);
       if (vitals == null) {
-        _log('Dropping malformed vitals packet: keys=${json.keys.join(',')}');
+        _log('⚠️ VitalsData.tryFromJsonMap returned null — packet dropped');
+        _log('  hr=${json['hr']} (${json['hr'].runtimeType})');
+        _log('  spo2=${json['spo2']} (${json['spo2'].runtimeType})');
+        _log('  br=${json['br']} (${json['br'].runtimeType})');
+        _log('  skin_temp=${json['skin_temp']} (${json['skin_temp'].runtimeType})');
         return;
       }
 
+      _log('✅ VitalsData: hr=${vitals.hr}, spo2=${vitals.spo2}, '
+          'br=${vitals.br}, skinTemp=${vitals.skinTemp}');
+
       _latest = vitals;
       _vitalsController.add(vitals);
+      _log('✅ Published to vitalsStream');
     } catch (e) {
-      _log('JSON parse error (dropping line): $e');
+      _log('❌ JSON parse error (dropping line): $e');
     }
   }
 
@@ -344,7 +476,9 @@ class EspBleService {
     await _connectionSub?.cancel();
     _cancelNotifySubs();
     if (_device != null) {
-      await _device!.disconnect();
+      try {
+        await _device!.disconnect();
+      } catch (_) {}
     }
 
     _statusController.add(BleConnectionStatus.disconnected);

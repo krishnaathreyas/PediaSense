@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../theme/app_theme.dart';
@@ -8,6 +9,8 @@ import '../models/cry_prediction.dart';
 import '../services/esp_ble_service.dart';
 import '../services/cry_detection_service.dart';
 import '../services/simulated_vitals_service.dart';
+import '../services/vital_status_evaluator.dart';
+import '../services/rag_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key, this.simulated = false});
@@ -19,8 +22,9 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   VitalsData? _vitals;
+  VitalEvaluation? _evaluation;
 
   BabyProfile _profile = BabyProfile.defaultProfile();
 
@@ -40,13 +44,26 @@ class _DashboardScreenState extends State<DashboardScreen>
   CryPrediction? _cryPrediction;
   String? _cryMessage;
 
-  late final AnimationController _orbController;
+  // ── Animation controllers ───────────────────────────────────────────────
+  late final AnimationController _orbPulseController;
+  late final AnimationController _orbBreathController;
+  late final AnimationController _bleDotController;
 
   @override
   void initState() {
     super.initState();
 
-    _orbController = AnimationController(
+    _orbPulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+
+    _orbBreathController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat(reverse: true);
+
+    _bleDotController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1100),
     )..repeat(reverse: true);
@@ -63,7 +80,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
       _vitalsSub = sim.stream.listen((vitals) {
         if (!mounted) return;
-        setState(() => _vitals = vitals);
+        _onVitalsReceived(vitals);
       });
 
       if (!mounted) return;
@@ -85,7 +102,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
       _vitalsSub = ble.vitalsStream.listen((vitals) {
         if (!mounted) return;
-        setState(() => _vitals = vitals);
+        _onVitalsReceived(vitals);
       });
 
       // If already connected via the DeviceConnectionScreen, don't force a re-scan.
@@ -94,7 +111,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       } else {
         final latest = ble.latestVitals;
         if (latest != null && mounted) {
-          setState(() => _vitals = latest);
+          _onVitalsReceived(latest);
         }
       }
     } catch (_) {
@@ -102,6 +119,23 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (!mounted) return;
       setState(() => _bleStatus = BleConnectionStatus.disconnected);
     }
+  }
+
+  /// Central handler: BLE vitals → threshold engine → orb + alerts + RAG
+  void _onVitalsReceived(VitalsData vitals) {
+    final eval = VitalStatusEvaluator.instance.evaluate(vitals);
+
+    setState(() {
+      _vitals = vitals;
+      _evaluation = eval;
+    });
+
+    // Feed RAG service for auto-suggestion on AMBER/RED
+    RagService.instance.onVitalsUpdate(
+      vitals,
+      babyAgeMonths: _profile.ageMonths,
+      isLBW: _profile.isLowBirthWeight,
+    );
   }
 
   Future<void> _loadProfile() async {
@@ -116,11 +150,17 @@ class _DashboardScreenState extends State<DashboardScreen>
     _vitalsSub?.cancel();
     _statusSub?.cancel();
     _crySub?.cancel();
-    _orbController.dispose();
+    _orbPulseController.dispose();
+    _orbBreathController.dispose();
+    _bleDotController.dispose();
     _bleService?.dispose();
     _sim?.stop();
     super.dispose();
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  BUILD
+  // ═══════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -140,20 +180,30 @@ class _DashboardScreenState extends State<DashboardScreen>
                   style: Theme.of(context).textTheme.headlineLarge,
                 ),
               ),
-              _BleStatusDot(controller: _orbController, status: _bleStatus),
+              _BleStatusDot(controller: _bleDotController, status: _bleStatus),
             ],
           ),
           const SizedBox(height: 6),
           Text(_bleStatusLabel, style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: 18),
+          const SizedBox(height: 24),
 
-          // Vitals (edge-processed by ESP32)
+          // ── CENTRAL HEALTH ORB ─────────────────────────────────────────
+          Center(child: _buildHealthOrb()),
+          const SizedBox(height: 24),
+
+          // ── ALERT BANNERS ──────────────────────────────────────────────
+          if (_evaluation != null && _evaluation!.hasAlerts) ...[
+            _buildAlertBanners(),
+            const SizedBox(height: 20),
+          ],
+
+          // ── VITALS GRID ────────────────────────────────────────────────
           Text('Vitals', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 12),
           _buildVitalsGrid(),
           const SizedBox(height: 22),
 
-          // Detect Cry
+          // ── CRY DETECTION ──────────────────────────────────────────────
           Text('Detect Cry', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 12),
           _buildCryDetectionCard(),
@@ -164,6 +214,286 @@ class _DashboardScreenState extends State<DashboardScreen>
       ),
     );
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  CENTRAL HEALTH ORB
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildHealthOrb() {
+    // Determine orb state
+    final bool isDisconnected = _vitals == null &&
+        _bleStatus != BleConnectionStatus.connected &&
+        !widget.simulated;
+
+    Color orbColor;
+    String orbLabel;
+    String orbSublabel;
+    IconData orbIcon;
+
+    if (isDisconnected) {
+      orbColor = Colors.grey.shade500;
+      orbLabel = 'No Signal';
+      orbSublabel = 'Device disconnected';
+      orbIcon = Icons.bluetooth_disabled;
+    } else if (_vitals == null) {
+      orbColor = Colors.grey.shade400;
+      orbLabel = 'Waiting';
+      orbSublabel = 'Receiving vitals...';
+      orbIcon = Icons.hourglass_top;
+    } else {
+      final level = _evaluation!.overallLevel;
+      orbColor = _riskColor(level);
+      orbLabel = switch (level) {
+        RiskLevel.green => 'Stable',
+        RiskLevel.amber => 'Caution',
+        RiskLevel.red   => 'Critical',
+      };
+      orbSublabel = _evaluation!.overallMessage;
+      orbIcon = switch (level) {
+        RiskLevel.green => Icons.check_circle_outline,
+        RiskLevel.amber => Icons.warning_amber_rounded,
+        RiskLevel.red   => Icons.error_outline,
+      };
+    }
+
+    return Column(
+      children: [
+        _HealthOrb(
+          pulseController: _orbPulseController,
+          breathController: _orbBreathController,
+          color: orbColor,
+          icon: orbIcon,
+          isActive: _vitals != null,
+        ),
+        const SizedBox(height: 16),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: Text(
+            orbLabel,
+            key: ValueKey(orbLabel),
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: orbColor,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: Text(
+            orbSublabel,
+            key: ValueKey(orbSublabel),
+            style: Theme.of(context).textTheme.bodySmall,
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  ALERT BANNERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildAlertBanners() {
+    final alerts = _evaluation!.activeAlerts;
+
+    return Column(
+      children: alerts.map((alert) {
+        final isRed = alert.level == RiskLevel.red;
+        final color = isRed ? AppTheme.errorMain : AppTheme.warningMain;
+        final bgColor = isRed
+            ? AppTheme.errorMain.withValues(alpha: 0.08)
+            : AppTheme.warningMain.withValues(alpha: 0.08);
+        final borderColor = isRed
+            ? AppTheme.errorMain.withValues(alpha: 0.3)
+            : AppTheme.warningMain.withValues(alpha: 0.3);
+
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                isRed ? Icons.error_outline : Icons.warning_amber_rounded,
+                size: 20,
+                color: color,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${alert.vital}: ${alert.shortLabel}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: color,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      alert.message,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: color.withValues(alpha: 0.85),
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  VITALS GRID
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildVitalsGrid() {
+    final v = _vitals;
+
+    // Per-vital risk colors from the evaluation
+    Color hrColor = AppTheme.errorMain;
+    Color spo2Color = AppTheme.primaryMain;
+    Color brColor = AppTheme.infoMain;
+    Color tempColor = AppTheme.warningMain;
+
+    if (_evaluation != null) {
+      for (final a in _evaluation!.alerts) {
+        final c = _riskColor(a.level);
+        switch (a.vital) {
+          case 'Heart Rate':
+            hrColor = a.level == RiskLevel.green ? AppTheme.errorMain : c;
+          case 'SpO₂':
+            spo2Color = a.level == RiskLevel.green ? AppTheme.primaryMain : c;
+          case 'Breathing Rate':
+            brColor = a.level == RiskLevel.green ? AppTheme.infoMain : c;
+          case 'Skin Temperature':
+            tempColor = a.level == RiskLevel.green ? AppTheme.warningMain : c;
+        }
+      }
+    }
+
+    return GridView.count(
+      crossAxisCount: 2,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      childAspectRatio: 1.15,
+      children: [
+        _buildVitalCard(
+          icon: Icons.favorite,
+          accent: hrColor,
+          label: 'Heart Rate',
+          value: v == null ? '--' : '${v.hr}',
+          unit: 'bpm',
+        ),
+        _buildVitalCard(
+          icon: Icons.opacity,
+          accent: spo2Color,
+          label: 'SpO₂',
+          value: v == null ? '--' : '${v.spo2}',
+          unit: '%',
+        ),
+        _buildVitalCard(
+          icon: Icons.air,
+          accent: brColor,
+          label: 'Breathing Rate',
+          value: v == null ? '--' : '${v.br}',
+          unit: 'breaths/min',
+        ),
+        _buildVitalCard(
+          icon: Icons.thermostat,
+          accent: tempColor,
+          label: 'Skin Temperature',
+          value: v == null ? '--' : v.skinTemp.toStringAsFixed(1),
+          unit: '°C',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVitalCard({
+    required IconData icon,
+    required Color accent,
+    required String label,
+    required String value,
+    required String unit,
+  }) {
+    return Card(
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          gradient: LinearGradient(
+            colors: [
+              accent.withValues(alpha: 0.10),
+              accent.withValues(alpha: 0.03),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: 20, color: accent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 240),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: Text(
+                  value,
+                  key: ValueKey<String>(value),
+                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                    fontSize: 28,
+                    height: 1.1,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(unit, style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  CRY DETECTION
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Future<void> _startCryDetection() async {
     if (widget.simulated) {
@@ -254,8 +584,8 @@ class _DashboardScreenState extends State<DashboardScreen>
           children: [
             Row(
               children: [
-                _GlowingOrb(
-                  controller: _orbController,
+                _CryOrb(
+                  controller: _bleDotController,
                   color: glow,
                   active: isActive,
                 ),
@@ -390,6 +720,16 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  HELPERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Color _riskColor(RiskLevel level) => switch (level) {
+    RiskLevel.green => AppTheme.successMain,
+    RiskLevel.amber => AppTheme.warningMain,
+    RiskLevel.red   => AppTheme.errorMain,
+  };
+
   String get _bleStatusLabel {
     if (widget.simulated) {
       return 'Simulated dashboard (no BLE connection)';
@@ -407,112 +747,149 @@ class _DashboardScreenState extends State<DashboardScreen>
         return 'Disconnected';
     }
   }
+}
 
-  Widget _buildVitalsGrid() {
-    final v = _vitals;
+// ═══════════════════════════════════════════════════════════════════════════════
+//  HEALTH ORB — Central animated neonatal health indicator
+// ═══════════════════════════════════════════════════════════════════════════════
 
-    return GridView.count(
-      crossAxisCount: 2,
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 1.15,
-      children: [
-        _buildVitalCard(
-          icon: Icons.favorite,
-          accent: AppTheme.errorMain,
-          label: 'Heart Rate',
-          value: v == null ? '--' : '${v.hr}',
-          unit: 'bpm',
-        ),
-        _buildVitalCard(
-          icon: Icons.opacity,
-          accent: AppTheme.primaryMain,
-          label: 'SpO₂',
-          value: v == null ? '--' : '${v.spo2}',
-          unit: '%',
-        ),
-        _buildVitalCard(
-          icon: Icons.air,
-          accent: AppTheme.infoMain,
-          label: 'Breathing Rate',
-          value: v == null ? '--' : '${v.br}',
-          unit: 'breaths/min',
-        ),
-        _buildVitalCard(
-          icon: Icons.thermostat,
-          accent: AppTheme.warningMain,
-          label: 'Skin Temperature',
-          value: v == null ? '--' : v.skinTemp.toStringAsFixed(1),
-          unit: '°C',
-        ),
-      ],
-    );
-  }
+class _HealthOrb extends StatelessWidget {
+  const _HealthOrb({
+    required this.pulseController,
+    required this.breathController,
+    required this.color,
+    required this.icon,
+    required this.isActive,
+  });
 
-  Widget _buildVitalCard({
-    required IconData icon,
-    required Color accent,
-    required String label,
-    required String value,
-    required String unit,
-  }) {
-    return Card(
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          gradient: LinearGradient(
-            colors: [
-              accent.withValues(alpha: 0.10),
-              accent.withValues(alpha: 0.03),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  final AnimationController pulseController;
+  final AnimationController breathController;
+  final Color color;
+  final IconData icon;
+  final bool isActive;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge([pulseController, breathController]),
+      builder: (context, _) {
+        final pulse = pulseController.value;
+        final breath = breathController.value;
+
+        // Breathing scale: subtle expansion/contraction
+        final breathScale = isActive ? 1.0 + 0.04 * math.sin(breath * math.pi) : 1.0;
+        // Pulse glow intensity
+        final glowIntensity = isActive ? 0.3 + 0.4 * pulse : 0.15;
+        // Outer ring pulse
+        final ringScale = isActive ? 1.0 + 0.06 * pulse : 1.0;
+
+        return SizedBox(
+          width: 160,
+          height: 160,
+          child: Stack(
+            alignment: Alignment.center,
             children: [
-              Row(
-                children: [
-                  Icon(icon, size: 20, color: accent),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: Theme.of(context).textTheme.bodySmall,
-                      overflow: TextOverflow.ellipsis,
+              // Outer glow ring 3 (furthest)
+              Transform.scale(
+                scale: ringScale * 1.35,
+                child: Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: color.withValues(alpha: 0.06 + 0.06 * pulse),
+                      width: 1.5,
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 240),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                child: Text(
-                  value,
-                  key: ValueKey<String>(value),
-                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                    fontSize: 28,
-                    height: 1.1,
-                    color: AppTheme.textPrimary,
                   ),
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(unit, style: Theme.of(context).textTheme.bodySmall),
+
+              // Outer glow ring 2
+              Transform.scale(
+                scale: ringScale * 1.18,
+                child: Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: color.withValues(alpha: 0.10 + 0.10 * pulse),
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+
+              // Outer glow ring 1
+              Transform.scale(
+                scale: ringScale,
+                child: Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withValues(alpha: glowIntensity * 0.5),
+                        blurRadius: 30,
+                        spreadRadius: 5,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Main orb body
+              Transform.scale(
+                scale: breathScale,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 600),
+                  curve: Curves.easeInOut,
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        color.withValues(alpha: 0.95),
+                        color.withValues(alpha: 0.7),
+                        color.withValues(alpha: 0.4),
+                      ],
+                      stops: const [0.0, 0.6, 1.0],
+                      radius: 0.85,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withValues(alpha: glowIntensity),
+                        blurRadius: 40,
+                        spreadRadius: 2,
+                      ),
+                      BoxShadow(
+                        color: color.withValues(alpha: glowIntensity * 0.6),
+                        blurRadius: 16,
+                        spreadRadius: 0,
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    icon,
+                    color: Colors.white,
+                    size: 42,
+                  ),
+                ),
+              ),
             ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  BLE STATUS DOT
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class _BleStatusDot extends StatelessWidget {
   const _BleStatusDot({required this.controller, required this.status});
@@ -578,8 +955,12 @@ class _BleStatusDot extends StatelessWidget {
   }
 }
 
-class _GlowingOrb extends StatelessWidget {
-  const _GlowingOrb({
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CRY DETECTION ORB (smaller, for the cry card)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class _CryOrb extends StatelessWidget {
+  const _CryOrb({
     required this.controller,
     required this.color,
     required this.active,

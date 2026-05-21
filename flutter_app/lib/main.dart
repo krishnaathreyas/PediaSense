@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/caregiver_setup_screen.dart';
 import 'screens/device_connection_screen.dart';
 import 'screens/main_shell.dart';
+import 'services/app_session.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,12 +41,19 @@ class PediaSenseApp extends StatelessWidget {
   }
 }
 
-/// Checks both Supabase auth session AND local profile.
+/// Startup gate that ensures the full user context is ready before any
+/// downstream screen is shown.
 ///
 /// Flow:
-///   1. If NOT logged in → /login
-///   2. If logged in but NO baby profile → /setup
-///   3. If logged in AND has profile → /device (BLE connection screen)
+///   1. Initialise [AppSession] (checks auth + loads baby profile)
+///   2. Route accordingly:
+///      • No session       → /login
+///      • No baby profile  → /setup
+///      • Fully ready      → /device (connection screen – ALWAYS shown)
+///
+/// After this gate, [AppSession.instance.isReady] is guaranteed true and
+/// [AppSession.instance.babyId] is non-null.  Trends, chat, logs, analytics
+/// can safely query Supabase with the baby context.
 class SplashGate extends StatefulWidget {
   const SplashGate({super.key});
 
@@ -58,41 +65,23 @@ class _SplashGateState extends State<SplashGate> {
   @override
   void initState() {
     super.initState();
-    _checkSession();
+    _bootstrap();
   }
 
-  Future<void> _checkSession() async {
+  Future<void> _bootstrap() async {
     // Brief delay for splash feel
     await Future.delayed(const Duration(milliseconds: 800));
 
     if (!mounted) return;
 
-    // 1. Check Supabase auth session
-    final session = Supabase.instance.client.auth.currentSession;
-
-    if (session == null) {
-      // Not logged in → login screen
-      Navigator.pushReplacementNamed(context, '/login');
-      return;
-    }
-
-    // 2. Logged in — fast local-first check during startup
-    // This avoids hanging on Supabase query during critical startup phase
-    final userId = session.user.id;
-    final localCacheKey = 'babyProfile_$userId';
-    final prefs = await SharedPreferences.getInstance();
-    final cachedProfile = prefs.getString(localCacheKey);
+    // AppSession.init() handles:
+    //   1. Auth session check
+    //   2. Baby profile fetch (Supabase → local cache fallback)
+    //   3. baby_id + userId global initialisation
+    final route = await AppSession.instance.init();
 
     if (!mounted) return;
-
-    if (cachedProfile != null) {
-      // Profile cached locally → go to BLE connection screen
-      Navigator.pushReplacementNamed(context, '/device');
-    } else {
-      // No local cache → go to setup
-      // Setup screen will do full Supabase check to determine if truly needs form or should bypass
-      Navigator.pushReplacementNamed(context, '/setup');
-    }
+    Navigator.pushReplacementNamed(context, route);
   }
 
   @override

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/baby_profile.dart';
+import '../services/app_session.dart';
 
 class CaregiverSetupScreen extends StatefulWidget {
   const CaregiverSetupScreen({super.key});
@@ -52,6 +53,9 @@ class _CaregiverSetupScreenState extends State<CaregiverSetupScreen> {
     if (!mounted) return;
 
     if (hasProfile) {
+      // Ensure global session is activated before navigating
+      await AppSession.instance.activateAfterSetup();
+      if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/device');
       return;
     }
@@ -71,6 +75,10 @@ class _CaregiverSetupScreenState extends State<CaregiverSetupScreen> {
         isLowBirthWeight: _isLowBirthWeight,
       );
       await BabyProfile.save(profile);
+
+      // Activate global session (baby_id, profile) BEFORE navigating
+      await AppSession.instance.activateAfterSetup();
+
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/device');
       }

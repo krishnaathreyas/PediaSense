@@ -64,11 +64,15 @@ class BleAudioService {
   static final BleAudioService instance = BleAudioService._internal();
   factory BleAudioService() => instance;
 
-  // TODO: Replace these with ESP32 firmware UUIDs.
+  /// Command characteristic — write START/STOP commands.
   static final Guid cryCommandUuid = Guid(
-    '11111111-2222-3333-4444-555555555555',
+    'c8d2f3a1-2b74-4f2e-bab1-3e9fc3e2e567',
   );
-  static final Guid cryAudioUuid = Guid('66666666-7777-8888-9999-aaaaaaaaaaaa');
+
+  /// Audio characteristic — receives PCM chunks via notify.
+  static final Guid cryAudioUuid = Guid(
+    'd1e2f3a4-5b6c-7d8e-9f0a-1b2c3d4e5f60',
+  );
 
   // Commands
   static const String startCryCaptureCmd = 'START_CRY_CAPTURE';
@@ -204,24 +208,35 @@ class BleAudioService {
     BluetoothCharacteristic? cmd;
     BluetoothCharacteristic? audio;
 
+    final targetService = EspBleService.serviceUuid.str.toLowerCase();
+    final targetCmd = cryCommandUuid.str.toLowerCase();
+    final targetAudio = cryAudioUuid.str.toLowerCase();
+
+    _log('Looking for cmd=$targetCmd, audio=$targetAudio in service=$targetService');
+
     for (final s in services) {
-      if (s.uuid != EspBleService.serviceUuid) continue;
+      if (s.uuid.str.toLowerCase() != targetService) continue;
+      _log('Found PediaSense service with ${s.characteristics.length} characteristics');
       for (final ch in s.characteristics) {
-        if (ch.uuid == cryCommandUuid) cmd = ch;
-        if (ch.uuid == cryAudioUuid) audio = ch;
+        final chUuid = ch.uuid.str.toLowerCase();
+        _log('  Characteristic: $chUuid');
+        if (chUuid == targetCmd) cmd = ch;
+        if (chUuid == targetAudio) audio = ch;
       }
     }
 
     if (cmd == null) {
       throw Exception(
-        'Cry command characteristic not found (UUID placeholder)',
+        'Cry command characteristic not found (expected UUID: $targetCmd)',
       );
     }
     if (audio == null) {
-      throw Exception('Cry audio characteristic not found (UUID placeholder)');
+      throw Exception(
+        'Cry audio characteristic not found (expected UUID: $targetAudio)',
+      );
     }
 
-    _log('Resolved cmd=${cmd.uuid}, audio=${audio.uuid}');
+    _log('Resolved cmd=${cmd.uuid.str}, audio=${audio.uuid.str}');
     return (cmd, audio);
   }
 }
@@ -251,28 +266,62 @@ class _BleAudioAssembler {
 
     if (chunk.isEmpty) return null;
 
-    // Marker-based framing (UTF-8 text over notify)
-    // Supported markers:
-    // - AUDIO_START
-    // - AUDIO_CHUNK
-    // - AUDIO_END
-    // Markers may arrive as dedicated notifications interleaved with raw PCM.
-    try {
-      final text = utf8.decode(chunk).trim();
-      if (text == 'AUDIO_START' || text.startsWith('AUDIO_START')) {
-        _buf = BytesBuilder(copy: false);
-        _expectedBytes = null;
-        _lastSeq = -1;
-        _sawEnd = false;
-        return BleAudioCaptureUpdate(
-          stage: BleAudioStage.streaming,
-          progress: 0,
-          bytesReceived: 0,
-          expectedBytes: _expectedBytes,
-          message: 'Audio start ($_sampleRate Hz)',
-        );
+    // ── Text/marker-based framing from ESP32 ──
+    // ESP32 sends:
+    //   "AUDIO_START"                  → reset buffer
+    //   "AUDIO_CHUNK:" + raw PCM bytes → extract PCM after header
+    //   "AUDIO_END"                    → mark complete
+    //
+    // We check for text markers first, but carefully handle
+    // AUDIO_CHUNK: which has binary data after the header.
+
+    // Check for pure text markers (AUDIO_START, AUDIO_END)
+    // These are short text-only notifications.
+    if (chunk.length < 20) {
+      try {
+        final text = utf8.decode(chunk).trim();
+        if (text == 'AUDIO_START') {
+          _buf = BytesBuilder(copy: false);
+          _expectedBytes = null;
+          _lastSeq = -1;
+          _sawEnd = false;
+          return BleAudioCaptureUpdate(
+            stage: BleAudioStage.streaming,
+            progress: 0,
+            bytesReceived: 0,
+            expectedBytes: _expectedBytes,
+            message: 'Audio start ($_sampleRate Hz)',
+          );
+        }
+        if (text == 'AUDIO_END') {
+          _sawEnd = true;
+          return BleAudioCaptureUpdate(
+            stage: BleAudioStage.completed,
+            progress: 1,
+            bytesReceived: _buf.length,
+            expectedBytes: _expectedBytes,
+            message: 'Audio end',
+          );
+        }
+      } catch (_) {
+        // Not valid UTF-8, treat as binary below
       }
-      if (text == 'AUDIO_CHUNK' || text.startsWith('AUDIO_CHUNK')) {
+    }
+
+    // Check for AUDIO_CHUNK: header (12 bytes) + binary PCM data
+    const chunkHeader = 'AUDIO_CHUNK:';
+    final headerBytes = utf8.encode(chunkHeader);
+    if (chunk.length > headerBytes.length) {
+      bool isChunk = true;
+      for (int i = 0; i < headerBytes.length && i < chunk.length; i++) {
+        if (chunk[i] != headerBytes[i]) { isChunk = false; break; }
+      }
+      if (isChunk) {
+        // Extract PCM data after the header
+        final pcmData = chunk.sublist(headerBytes.length);
+        if (pcmData.isNotEmpty) {
+          _buf.add(Uint8List.fromList(pcmData));
+        }
         final exp = _expectedBytes ?? fallbackExpectedBytes;
         final prog = exp > 0 ? (_buf.length / exp).clamp(0.0, 1.0) : 0.0;
         return BleAudioCaptureUpdate(
@@ -280,20 +329,9 @@ class _BleAudioAssembler {
           progress: prog,
           bytesReceived: _buf.length,
           expectedBytes: _expectedBytes,
+          message: 'Receiving audio (${_buf.length} bytes)',
         );
       }
-      if (text == 'AUDIO_END' || text.startsWith('AUDIO_END')) {
-        _sawEnd = true;
-        return BleAudioCaptureUpdate(
-          stage: BleAudioStage.completed,
-          progress: 1,
-          bytesReceived: _buf.length,
-          expectedBytes: _expectedBytes,
-          message: 'Audio end',
-        );
-      }
-    } catch (_) {
-      // Not UTF-8 text; treat as binary.
     }
 
     // Binary framed packets

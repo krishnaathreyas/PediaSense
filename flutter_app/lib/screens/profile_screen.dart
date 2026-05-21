@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../theme/app_theme.dart';
 import '../models/baby_profile.dart';
+import '../services/app_session.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -53,7 +54,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (confirm != true || !mounted) return;
 
-    await Supabase.instance.client.auth.signOut();
+    // Use AppSession to clear global state + Supabase sign-out
+    await AppSession.instance.signOut();
     if (mounted) {
       Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
     }
@@ -142,6 +144,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         onPressed: () async {
                           await Navigator.pushNamed(context, '/setup');
                           await _loadProfile();
+                          // Refresh global session with updated profile
+                          await AppSession.instance.refreshProfile();
                         },
                         icon: const Icon(Icons.edit, size: 16),
                         label: const Text('Edit'),
