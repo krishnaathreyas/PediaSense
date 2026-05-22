@@ -5,7 +5,9 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../theme/app_theme.dart';
 import '../models/vitals_data.dart';
 import '../models/baby_profile.dart';
+import '../models/care_log_summary.dart';
 import '../models/cry_prediction.dart';
+import '../services/care_log_service.dart';
 import '../services/esp_ble_service.dart';
 import '../services/cry_detection_service.dart';
 import '../services/simulated_vitals_service.dart';
@@ -27,6 +29,11 @@ class _DashboardScreenState extends State<DashboardScreen>
   VitalEvaluation? _evaluation;
 
   BabyProfile _profile = BabyProfile.defaultProfile();
+
+  // ── Care log integration ────────────────────────────────────────────────
+  CareLogSummary? _careLogSummary;
+  Timer? _careLogRefreshTimer;
+  static const _careLogRefreshInterval = Duration(minutes: 5);
 
   // Services
   EspBleService? _bleService;
@@ -70,6 +77,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     _loadProfile();
     _initVitalsSource();
+    _initCareLogRefresh();
   }
 
   Future<void> _initVitalsSource() async {
@@ -122,8 +130,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   /// Central handler: BLE vitals → threshold engine → orb + alerts + RAG
+  ///
+  /// Uses cached [_careLogSummary] (refreshed every 5 min) to provide
+  /// holistic IMNCI/IAP-grounded evaluation when care logs are available.
   void _onVitalsReceived(VitalsData vitals) {
-    final eval = VitalStatusEvaluator.instance.evaluate(vitals);
+    final eval = VitalStatusEvaluator.instance.evaluate(
+      vitals,
+      careLogSummary: _careLogSummary,
+    );
 
     setState(() {
       _vitals = vitals;
@@ -138,6 +152,39 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  // ── Care Log Summary ────────────────────────────────────────────────────
+
+  /// Initialize periodic care log summary refresh.
+  /// Fetches immediately, then every [_careLogRefreshInterval].
+  void _initCareLogRefresh() {
+    _refreshCareLogSummary(); // initial fetch
+    _careLogRefreshTimer = Timer.periodic(
+      _careLogRefreshInterval,
+      (_) => _refreshCareLogSummary(),
+    );
+  }
+
+  /// Fetch today's care log summary from Supabase (non-blocking).
+  /// On failure, keeps the previous summary (or null for vitals-only mode).
+  Future<void> _refreshCareLogSummary() async {
+    try {
+      final summary = await CareLogService.instance.buildTodaySummary();
+      if (!mounted) return;
+      _careLogSummary = summary;
+
+      // Re-evaluate with fresh care log data if we have vitals
+      if (_vitals != null) {
+        final eval = VitalStatusEvaluator.instance.evaluate(
+          _vitals!,
+          careLogSummary: _careLogSummary,
+        );
+        setState(() => _evaluation = eval);
+      }
+    } catch (_) {
+      // Non-blocking: vitals-only evaluation continues
+    }
+  }
+
   Future<void> _loadProfile() async {
     final profile = await BabyProfile.load();
     if (mounted) {
@@ -150,6 +197,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _vitalsSub?.cancel();
     _statusSub?.cancel();
     _crySub?.cancel();
+    _careLogRefreshTimer?.cancel();
     _orbPulseController.dispose();
     _orbBreathController.dispose();
     _bleDotController.dispose();
@@ -188,7 +236,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           const SizedBox(height: 24),
 
           // ── CENTRAL HEALTH ORB ─────────────────────────────────────────
-          Center(child: _buildHealthOrb()),
+          _buildHealthOrb(),
           const SizedBox(height: 24),
 
           // ── ALERT BANNERS ──────────────────────────────────────────────
@@ -226,70 +274,53 @@ class _DashboardScreenState extends State<DashboardScreen>
         !widget.simulated;
 
     Color orbColor;
-    String orbLabel;
-    String orbSublabel;
+    String orbBadgeLabel;
+    String orbTitle;
+    String orbSubtitle;
     IconData orbIcon;
 
     if (isDisconnected) {
       orbColor = Colors.grey.shade500;
-      orbLabel = 'No Signal';
-      orbSublabel = 'Device disconnected';
+      orbBadgeLabel = 'OFFLINE';
+      orbTitle = 'No Signal';
+      orbSubtitle = 'Device disconnected';
       orbIcon = Icons.bluetooth_disabled;
     } else if (_vitals == null) {
       orbColor = Colors.grey.shade400;
-      orbLabel = 'Waiting';
-      orbSublabel = 'Receiving vitals...';
+      orbBadgeLabel = 'WAITING';
+      orbTitle = 'Waiting';
+      orbSubtitle = 'Receiving vitals...';
       orbIcon = Icons.hourglass_top;
     } else {
       final level = _evaluation!.overallLevel;
       orbColor = _riskColor(level);
-      orbLabel = switch (level) {
-        RiskLevel.green => 'Stable',
-        RiskLevel.amber => 'Caution',
-        RiskLevel.red   => 'Critical',
+      orbBadgeLabel = switch (level) {
+        RiskLevel.green => 'NORMAL',
+        RiskLevel.amber => 'MONITOR',
+        RiskLevel.red   => 'URGENT',
       };
-      orbSublabel = _evaluation!.overallMessage;
+      orbTitle = switch (level) {
+        RiskLevel.green => 'Normal - Observe',
+        RiskLevel.amber => 'Monitor Closely',
+        RiskLevel.red   => 'Act Immediately',
+      };
+      orbSubtitle = _evaluation!.overallMessage;
       orbIcon = switch (level) {
-        RiskLevel.green => Icons.check_circle_outline,
-        RiskLevel.amber => Icons.warning_amber_rounded,
-        RiskLevel.red   => Icons.error_outline,
+        RiskLevel.green => Icons.check_circle,
+        RiskLevel.amber => Icons.warning_rounded,
+        RiskLevel.red   => Icons.error,
       };
     }
 
-    return Column(
-      children: [
-        _HealthOrb(
-          pulseController: _orbPulseController,
-          breathController: _orbBreathController,
-          color: orbColor,
-          icon: orbIcon,
-          isActive: _vitals != null,
-        ),
-        const SizedBox(height: 16),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          child: Text(
-            orbLabel,
-            key: ValueKey(orbLabel),
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-              color: orbColor,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          child: Text(
-            orbSublabel,
-            key: ValueKey(orbSublabel),
-            style: Theme.of(context).textTheme.bodySmall,
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ],
+    return _HealthOrbCard(
+      pulseController: _orbPulseController,
+      breathController: _orbBreathController,
+      color: orbColor,
+      icon: orbIcon,
+      badgeLabel: orbBadgeLabel,
+      title: orbTitle,
+      subtitle: orbSubtitle,
+      isActive: _vitals != null,
     );
   }
 
@@ -753,12 +784,15 @@ class _DashboardScreenState extends State<DashboardScreen>
 //  HEALTH ORB — Central animated neonatal health indicator
 // ═══════════════════════════════════════════════════════════════════════════════
 
-class _HealthOrb extends StatelessWidget {
-  const _HealthOrb({
+class _HealthOrbCard extends StatelessWidget {
+  const _HealthOrbCard({
     required this.pulseController,
     required this.breathController,
     required this.color,
     required this.icon,
+    required this.badgeLabel,
+    required this.title,
+    required this.subtitle,
     required this.isActive,
   });
 
@@ -766,6 +800,9 @@ class _HealthOrb extends StatelessWidget {
   final AnimationController breathController;
   final Color color;
   final IconData icon;
+  final String badgeLabel;
+  final String title;
+  final String subtitle;
   final bool isActive;
 
   @override
@@ -773,110 +810,111 @@ class _HealthOrb extends StatelessWidget {
     return AnimatedBuilder(
       animation: Listenable.merge([pulseController, breathController]),
       builder: (context, _) {
-        final pulse = pulseController.value;
         final breath = breathController.value;
 
-        // Breathing scale: subtle expansion/contraction
-        final breathScale = isActive ? 1.0 + 0.04 * math.sin(breath * math.pi) : 1.0;
-        // Pulse glow intensity
-        final glowIntensity = isActive ? 0.3 + 0.4 * pulse : 0.15;
-        // Outer ring pulse
-        final ringScale = isActive ? 1.0 + 0.06 * pulse : 1.0;
+        // Breathing scale for the white orb
+        final breathScale =
+            isActive ? 1.0 + 0.02 * math.sin(breath * math.pi) : 1.0;
 
-        return SizedBox(
-          width: 160,
-          height: 160,
-          child: Stack(
-            alignment: Alignment.center,
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 600),
+          curve: Curves.easeInOut,
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            gradient: LinearGradient(
+              colors: [
+                color,
+                color.withValues(alpha: 0.85),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.35),
+                blurRadius: 20,
+                spreadRadius: 2,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // Outer glow ring 3 (furthest)
-              Transform.scale(
-                scale: ringScale * 1.35,
-                child: Container(
-                  width: 140,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: color.withValues(alpha: 0.06 + 0.06 * pulse),
-                      width: 1.5,
-                    ),
-                  ),
-                ),
-              ),
-
-              // Outer glow ring 2
-              Transform.scale(
-                scale: ringScale * 1.18,
-                child: Container(
-                  width: 140,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: color.withValues(alpha: 0.10 + 0.10 * pulse),
-                      width: 2,
-                    ),
-                  ),
-                ),
-              ),
-
-              // Outer glow ring 1
-              Transform.scale(
-                scale: ringScale,
-                child: Container(
-                  width: 140,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: color.withValues(alpha: glowIntensity * 0.5),
-                        blurRadius: 30,
-                        spreadRadius: 5,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Main orb body
+              // ── White circle orb with icon and badge label ──
               Transform.scale(
                 scale: breathScale,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 600),
-                  curve: Curves.easeInOut,
-                  width: 120,
-                  height: 120,
+                child: Container(
+                  width: 110,
+                  height: 110,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        color.withValues(alpha: 0.95),
-                        color.withValues(alpha: 0.7),
-                        color.withValues(alpha: 0.4),
-                      ],
-                      stops: const [0.0, 0.6, 1.0],
-                      radius: 0.85,
-                    ),
+                    color: Colors.white,
                     boxShadow: [
                       BoxShadow(
-                        color: color.withValues(alpha: glowIntensity),
-                        blurRadius: 40,
-                        spreadRadius: 2,
-                      ),
-                      BoxShadow(
-                        color: color.withValues(alpha: glowIntensity * 0.6),
+                        color: Colors.black.withValues(alpha: 0.12),
                         blurRadius: 16,
-                        spreadRadius: 0,
+                        spreadRadius: 2,
                       ),
                     ],
                   ),
-                  child: Icon(
-                    icon,
-                    color: Colors.white,
-                    size: 42,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(icon, color: color, size: 40),
+                      const SizedBox(height: 4),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: Text(
+                          badgeLabel,
+                          key: ValueKey(badgeLabel),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: color,
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ── Title text ──
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: Text(
+                  title,
+                  key: ValueKey(title),
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    letterSpacing: 0.3,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+
+              const SizedBox(height: 6),
+
+              // ── Subtitle text ──
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: Text(
+                  subtitle,
+                  key: ValueKey(subtitle),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
+                    color: Colors.white.withValues(alpha: 0.85),
+                  ),
+                  textAlign: TextAlign.center,
                 ),
               ),
             ],
@@ -886,6 +924,7 @@ class _HealthOrb extends StatelessWidget {
     );
   }
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  BLE STATUS DOT

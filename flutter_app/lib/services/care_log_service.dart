@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/care_log_summary.dart';
 import '../models/log_entry.dart';
 
 /// Service for CRUD operations on the `care_logs` Supabase table.
@@ -145,6 +146,22 @@ class CareLogService {
     return (response as List)
         .map((row) => LogEntry.fromJson(row as Map<String, dynamic>))
         .toList();
+  }
+
+  // ── BUILD SUMMARY FOR EVALUATOR ──────────────────────────────────────
+
+  /// Fetch today's logs and aggregate them into a [CareLogSummary]
+  /// for the neonatal health evaluation engine.
+  ///
+  /// Returns [CareLogSummary.empty()] on failure so the evaluator
+  /// can gracefully fall back to vitals-only scoring.
+  Future<CareLogSummary> buildTodaySummary({String? babyId}) async {
+    try {
+      final logs = await fetchTodayLogs(babyId: babyId);
+      return CareLogSummary.fromLogs(logs);
+    } catch (_) {
+      return const CareLogSummary.empty();
+    }
   }
 
   // ── DELETE ──────────────────────────────────────────────────────────────
